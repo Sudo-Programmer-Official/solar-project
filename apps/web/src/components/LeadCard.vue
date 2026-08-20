@@ -6,29 +6,38 @@
         :property-id="lead.propertyId ?? null"
         :latitude="lead.latitude ?? null"
         :longitude="lead.longitude ?? null"
-        :address="displayTitle"
+        :address="fullAddress"
         :subtitle="locationLabel"
         compact
         :show-street-preview="false"
-        @action="verifyOnGoogleMaps"
       />
 
-      <div class="px-4 pb-4 pt-4">
+      <div class="px-4 py-4">
         <div class="flex items-start justify-between gap-3">
           <div class="space-y-2">
             <div class="flex flex-wrap items-center gap-2">
               <OpportunityScore :score="lead.opportunityScore" />
-              <WhaleBadge :isWhale="lead.whaleScore >= 60" />
+              <WhaleBadge v-if="lead.whaleScore >= 60" :isWhale="true" />
             </div>
+
             <div>
-              <h3 class="text-lg font-semibold text-slate-900">{{ displayTitle }}</h3>
-              <p class="mt-1 text-sm text-slate-500">{{ locationLabel }}</p>
+              <div class="flex items-start gap-2">
+                <h3 class="text-lg font-semibold text-slate-900">{{ streetLabel }}</h3>
+                <button
+                  class="touch-target mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-primary-200 hover:text-primary-500"
+                  type="button"
+                  aria-label="Copy address"
+                  title="Copy address"
+                  @click="copyAddress"
+                >
+                  <el-icon :size="16">
+                    <CopyDocument />
+                  </el-icon>
+                </button>
+              </div>
+              <p class="mt-1 text-sm text-slate-500">{{ locationLabel }} · {{ distanceLabel }}</p>
             </div>
           </div>
-        </div>
-
-        <div class="mt-4">
-          <LocationMatchBadge :verification="lead.locationVerification ?? null" />
         </div>
 
         <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -50,34 +59,18 @@
           </div>
         </div>
 
-        <div class="mt-4">
-          <p class="field-label">Why this lead</p>
-          <div class="mt-2 flex flex-wrap gap-2">
-          <SignalChip v-for="signal in displaySignals" :key="signal" :label="signal" />
-        </div>
-      </div>
-
-      <div class="mt-4">
-          <NextBestActionCard :action="lead.nextBestAction ?? actionModel" />
-        </div>
-
-        <details class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-          <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900">Why this score?</summary>
-          <div class="mt-3 space-y-2 text-sm text-slate-500">
-            <p v-for="reason in lead.reasons.slice(0, 3)" :key="reason">
-              {{ reason }}
-            </p>
-          </div>
-        </details>
-
         <div class="mt-4 grid grid-cols-3 gap-2">
-          <button class="touch-target rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700" @click="verifyOnGoogleMaps">
-            Verify on Google Maps
-          </button>
-          <button class="touch-target rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700" @click="$emit('navigate')">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="$emit('navigate')">
             Navigate
           </button>
-          <button class="touch-target rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700" @click="$emit('open')">
+          <button
+            class="touch-target rounded-2xl border px-3 py-3 text-sm font-semibold shadow-sm"
+            :class="selected ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-700'"
+            @click="$emit('toggle')"
+          >
+            {{ selected ? "Added ✓" : "Add to Route" }}
+          </button>
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="$emit('open')">
             Open
           </button>
         </div>
@@ -88,58 +81,32 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import type { NextBestAction as NextBestActionModel, OpportunitySignal, TodayLeadCard } from "@solar/contracts";
+import type { TodayLeadCard } from "@solar/contracts";
+import { ElIcon, ElMessage } from "element-plus";
+import { CopyDocument } from "@element-plus/icons-vue";
 import SatelliteImagePanel from "./SatelliteImagePanel.vue";
-import LocationMatchBadge from "./LocationMatchBadge.vue";
 import OpportunityScore from "./OpportunityScore.vue";
 import WhaleBadge from "./WhaleBadge.vue";
-import SignalChip from "./SignalChip.vue";
-import NextBestActionCard from "./NextBestAction.vue";
-import { buildGoogleMapsSearchUrl } from "../services/imagery";
 
 const props = defineProps<{
   lead: TodayLeadCard;
   selected?: boolean;
 }>();
 
-defineEmits<{ navigate: []; open: [] }>();
+defineEmits<{
+  navigate: [];
+  toggle: [];
+  open: [];
+}>();
 
-const actionModel = computed<NextBestActionModel>(() => ({
-  code: props.lead.nextAction === "GET BILL" ? "GET_BILL" : "NO_ACTION",
-  label: props.lead.nextAction,
-  reason: props.lead.signals[0] ?? "Priority lead",
-  priority: props.lead.whaleScore >= 60 ? "HIGH" : "MEDIUM",
-  tone: "sales",
-}));
-
-const displayTitle = computed(() => formatLeadTitle(props.lead.address, props.lead.city, props.lead.state, props.lead.postalCode));
+const streetLabel = computed(() => sanitizeText(props.lead.address) || "Address unavailable");
 const locationLabel = computed(() => formatLocationLabel(props.lead.city, props.lead.state, props.lead.postalCode));
-const distanceLabel = computed(() => (props.lead.distanceMiles == null ? "Distance pending" : `${props.lead.distanceMiles.toFixed(1)} mi`));
-const displaySignals = computed(() => {
-  if (props.lead.opportunitySignals?.length) {
-    return props.lead.opportunitySignals.slice(0, 3).map(formatOpportunitySignal);
-  }
-  return props.lead.reasons.slice(0, 3);
-});
+const fullAddress = computed(() => [streetLabel.value, locationLabel.value].filter((item) => item && item !== "Location unavailable").join(", "));
+const distanceLabel = computed(() => (props.lead.distanceMiles == null ? "Distance unknown" : `${props.lead.distanceMiles.toFixed(1)} mi`));
 
 function formatNumber(value?: number | null) {
   if (value == null) return "--";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatOpportunitySignal(signal: OpportunitySignal) {
-  const value = signal.value == null ? "" : ` ${formatSignalValue(signal.value)}${signal.unit ? ` ${signal.unit}` : ""}`;
-  return `${signal.label}${value}`.trim();
-}
-
-function formatSignalValue(value: OpportunitySignal["value"]) {
-  if (typeof value === "number") {
-    return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
-  }
-  if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
-  }
-  return String(value);
 }
 
 function formatLocationLabel(city?: string | null, state?: string | null, postalCode?: string | null) {
@@ -149,15 +116,6 @@ function formatLocationLabel(city?: string | null, state?: string | null, postal
   const cityComponent = cleanCity && !isPlusCode(cleanCity) ? cleanCity : null;
   const line = cityComponent && cleanState ? `${cityComponent}, ${cleanState}${cleanPostalCode ? ` ${cleanPostalCode}` : ""}` : cityComponent ?? cleanPostalCode;
   return line || "Location unavailable";
-}
-
-function formatLeadTitle(address?: string | null, city?: string | null, state?: string | null, postalCode?: string | null) {
-  const cleanAddress = sanitizeText(address);
-  if (cleanAddress && !isPlusCode(cleanAddress)) {
-    return cleanAddress;
-  }
-  const location = formatLocationLabel(city, state, postalCode);
-  return location === "Location unavailable" ? "Address unavailable" : location;
 }
 
 function abbreviateState(state?: string | null) {
@@ -227,8 +185,12 @@ function isPlusCode(value: string) {
   return /(?:^|\s)[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}(?:\s|$)/i.test(value);
 }
 
-function verifyOnGoogleMaps() {
-  if (props.lead.latitude == null || props.lead.longitude == null) return;
-  window.open(buildGoogleMapsSearchUrl(props.lead.latitude, props.lead.longitude), "_blank", "noopener,noreferrer");
+async function copyAddress() {
+  try {
+    await navigator.clipboard.writeText(fullAddress.value || streetLabel.value);
+    ElMessage.success("Address copied");
+  } catch {
+    ElMessage.error("Couldn't copy address");
+  }
 }
 </script>

@@ -60,6 +60,10 @@
             <span class="text-slate-500">Priority</span>
             <strong class="mt-1 block text-slate-900">#{{ route.current.priorityIndex }}</strong>
           </div>
+          <div class="rounded-2xl bg-slate-50 p-3 col-span-2">
+            <span class="text-slate-500">Coordinates</span>
+            <strong class="mt-1 block text-slate-900">{{ coordinateLabel(route.current.propertyId) }}</strong>
+          </div>
         </div>
         <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
           <p class="field-label">Reason for priority</p>
@@ -72,6 +76,7 @@
         <p class="field-label">Next stop</p>
         <p class="mt-2 text-lg font-semibold text-slate-900">{{ route.next.address }}</p>
         <p class="mt-1 text-sm text-slate-500">{{ route.next.reason }}</p>
+        <p class="mt-3 text-sm text-slate-500">Coordinates: <span class="font-semibold text-slate-900">{{ coordinateLabel(route.next.propertyId) }}</span></p>
       </section>
 
       <section class="mt-4 page-surface p-4">
@@ -92,6 +97,7 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
+import { storeToRefs } from "pinia";
 import MobileHeader from "../components/MobileHeader.vue";
 import EmptyState from "../components/EmptyState.vue";
 import { useHuntStore } from "../stores/hunt.store";
@@ -101,6 +107,7 @@ import type { LeadOutcome } from "@solar/contracts";
 const router = useRouter();
 const hunt = useHuntStore();
 const searchContextStore = useSearchContextStore();
+const { scanResults } = storeToRefs(hunt);
 
 const route = computed(() => {
   const source = hunt.routeProgress?.route ?? hunt.routePlan;
@@ -126,6 +133,14 @@ const outcomes: Array<{ label: string; value: LeadOutcome["outcome"] }> = [
   { label: "Appointment", value: "APPOINTMENT_BOOKED" },
 ];
 const currentContextLabel = computed(() => searchContextStore.contextLabel || "No search context selected");
+const scanResultsByPropertyId = computed(() => {
+  const map = new Map<string, { latitude?: number | null; longitude?: number | null }>();
+  for (const lead of scanResults.value) {
+    const key = lead.propertyId ?? lead.id;
+    map.set(key, { latitude: lead.latitude, longitude: lead.longitude });
+  }
+  return map;
+});
 
 onMounted(() => {
   void hunt.refreshRoute();
@@ -151,5 +166,13 @@ function skipCurrent() {
 
 function formatMiles(value: number) {
   return `${value.toFixed(1)} mi`;
+}
+
+function coordinateLabel(propertyId: string) {
+  const coords = scanResultsByPropertyId.value.get(propertyId);
+  if (!coords || coords.latitude == null || coords.longitude == null) {
+    return "Unavailable";
+  }
+  return `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`;
 }
 </script>

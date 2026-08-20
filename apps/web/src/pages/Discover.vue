@@ -55,9 +55,10 @@
               v-for="lead in rankedPropertyCards"
               :key="lead.id"
               :lead="lead"
-              @navigate="openProperty(lead)"
+              :selected="selectedIds.has(lead.propertyId ?? lead.id)"
+              @navigate="navigateToLead(lead)"
+              @toggle="toggleLead(lead)"
               @open="openProperty(lead)"
-              @not-home="markNotHome(lead)"
             />
           </div>
         </div>
@@ -74,6 +75,7 @@ import type { TodayLeadCard } from "@solar/contracts";
 import { useTerritoryStore } from "../stores/territory.store";
 import { useLeadActions } from "../composables/useLeadActions";
 import { useSearchContextStore } from "../stores/search-context.store";
+import { useHuntStore } from "../stores/hunt.store";
 import MobileHeader from "../components/MobileHeader.vue";
 import LoadingCard from "../components/LoadingCard.vue";
 import DataQualityBadge from "../components/DataQualityBadge.vue";
@@ -82,8 +84,10 @@ import LeadCard from "../components/LeadCard.vue";
 const router = useRouter();
 const territoryStore = useTerritoryStore();
 const searchContextStore = useSearchContextStore();
+const hunt = useHuntStore();
 const { neighborhoods, properties, loading, radiusMiles } = storeToRefs(territoryStore);
-const { updateOutcome } = useLeadActions();
+const { updateOutcome, openDirections } = useLeadActions();
+const selectedIds = computed(() => new Set(hunt.selectedPropertyIds));
 
 const rankedPropertyCards = computed(() => {
   return properties.value
@@ -146,8 +150,20 @@ function matchesFilters(lead: TodayLeadCard) {
   return true;
 }
 
+function navigateToLead(lead: TodayLeadCard) {
+  if (lead.latitude != null && lead.longitude != null) {
+    openDirections(lead.latitude, lead.longitude);
+    return;
+  }
+  openProperty(lead);
+}
+
 function openProperty(lead: TodayLeadCard) {
   router.push(`/properties/${lead.propertyId ?? encodeURIComponent(lead.address)}`);
+}
+
+function toggleLead(lead: TodayLeadCard) {
+  hunt.selectLead(lead.propertyId ?? lead.id);
 }
 
 async function markNotHome(lead: TodayLeadCard) {

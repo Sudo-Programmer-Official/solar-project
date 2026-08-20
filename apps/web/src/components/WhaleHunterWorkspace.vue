@@ -112,11 +112,8 @@
         <div class="mt-4 flex items-center justify-between gap-3">
           <div>
             <p class="text-sm font-semibold text-slate-900">{{ selectedCount }} selected</p>
-            <p class="text-xs text-slate-500">Create a simple walking route.</p>
+            <p class="text-xs text-slate-500">Use the route bar below to build the walk.</p>
           </div>
-          <button class="touch-target rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm disabled:opacity-50" :disabled="selectedIds.size === 0 || routeLoading" @click="createRoute">
-            {{ routeLoading ? "Building..." : "Add to Route" }}
-          </button>
         </div>
       </section>
     </section>
@@ -130,7 +127,7 @@
         action-label="Find Best Doors"
         @action="runScan"
       />
-      <DiscoveryLeadCard
+      <LeadCard
         v-for="lead in visibleResults"
         :key="lead.id"
         :lead="lead"
@@ -168,7 +165,7 @@
       </div>
     </section>
 
-    <div class="sticky bottom-24 mt-4">
+    <div v-if="selectedIds.size > 0" class="sticky bottom-24 mt-4">
       <div class="page-surface mx-auto flex max-w-md items-center justify-between gap-3 px-4 py-3">
         <div>
           <p class="text-sm font-semibold text-slate-900">{{ selectedIds.size }} selected</p>
@@ -180,7 +177,7 @@
       </div>
     </div>
 
-        <div v-if="selectedCluster || selectedLead" class="fixed inset-x-0 bottom-20 z-40 px-4">
+    <div v-if="selectedCluster || selectedLead" class="fixed inset-x-0 bottom-20 z-40 px-4">
       <div class="page-surface mx-auto max-w-md p-4 shadow-2xl">
         <div class="flex items-start justify-between gap-3">
           <div>
@@ -252,7 +249,7 @@ import { useHuntStore } from "../stores/hunt.store";
 import { useSearchContextStore } from "../stores/search-context.store";
 import { resolveLocation } from "../services/api";
 import PropertyVisual, { type PropertyVisualPoint } from "./PropertyVisual.vue";
-import DiscoveryLeadCard from "./DiscoveryLeadCard.vue";
+import LeadCard from "./LeadCard.vue";
 import LoadingCard from "./LoadingCard.vue";
 import EmptyState from "./EmptyState.vue";
 import MobileHeader from "./MobileHeader.vue";

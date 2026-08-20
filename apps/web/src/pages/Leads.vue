@@ -14,9 +14,10 @@
         v-for="lead in filteredLeads"
         :key="lead.id"
         :lead="lead"
+        :selected="selectedIds.has(lead.propertyId ?? lead.id)"
         @navigate="navigate(lead)"
+        @toggle="toggleLead(lead)"
         @open="openLead(lead)"
-        @not-home="setOutcome(lead, 'NOT_HOME')"
       />
     </section>
   </main>
@@ -33,12 +34,15 @@ import MobileHeader from "../components/MobileHeader.vue";
 import LoadingCard from "../components/LoadingCard.vue";
 import { useLeadActions } from "../composables/useLeadActions";
 import { useSearchContextStore } from "../stores/search-context.store";
+import { useHuntStore } from "../stores/hunt.store";
 
 const router = useRouter();
 const leadStore = useLeadStore();
+const hunt = useHuntStore();
 const searchContextStore = useSearchContextStore();
 const { filteredLeads, loading, summary } = storeToRefs(leadStore);
-const { updateOutcome } = useLeadActions();
+const { updateOutcome, openDirections } = useLeadActions();
+const selectedIds = computed(() => new Set(hunt.selectedPropertyIds));
 
 onMounted(async () => {
   if (leadStore.leads.length === 0) {
@@ -59,6 +63,11 @@ const leadCountLabel = computed(
 );
 
 function navigate(lead: { propertyId?: string | null; address: string }) {
+  const fullLead = leadStore.leadById(lead.propertyId ?? encodeURIComponent(lead.address));
+  if (fullLead?.latitude != null && fullLead.longitude != null) {
+    openDirections(fullLead.latitude, fullLead.longitude);
+    return;
+  }
   router.push(`/properties/${lead.propertyId ?? encodeURIComponent(lead.address)}`);
 }
 
@@ -69,5 +78,9 @@ function openLead(lead: { propertyId?: string | null; address: string }) {
 async function setOutcome(lead: { propertyId?: string | null; address: string }, outcome: LeadOutcome["outcome"]) {
   await updateOutcome(lead.propertyId ?? encodeURIComponent(lead.address), outcome);
   await leadStore.loadTopLeads();
+}
+
+function toggleLead(lead: { propertyId?: string | null; address: string }) {
+  hunt.selectLead(lead.propertyId ?? encodeURIComponent(lead.address));
 }
 </script>
