@@ -68,6 +68,15 @@ export const useHuntStore = defineStore("hunt", () => {
     if (currentIndex < 0) return null;
     return route.stops.slice(currentIndex + 1).find((stop) => !completed.has(stop.propertyId)) ?? null;
   });
+  const scanStatus = computed(() => scanProgress.value?.status ?? null);
+  const scanStage = computed(() => scanStatus.value);
+  const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !["COMPLETE", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"].includes(scanStatus.value)));
+  const isComplete = computed(() => scanStatus.value === "COMPLETE");
+  const discoveredCount = computed(() => scanProgress.value?.metrics.discoveredCount ?? scanProgress.value?.metrics.discoveredProperties ?? 0);
+  const strongLeadCount = computed(() => scanProgress.value?.metrics.resultsFound ?? scanResults.value.length ?? 0);
+  const solarAnalyzedCount = computed(() => scanProgress.value?.metrics.solarAnalyzedCount ?? 0);
+  const solarAnalysisTarget = computed(() => scanProgress.value?.metrics.prequalifiedCount ?? 0);
+  const totalAvailable = computed(() => scanResultsTotal.value);
 
   function setRadius(value: 5 | 10 | 20) {
     radiusMiles.value = value;
@@ -284,6 +293,15 @@ export const useHuntStore = defineStore("hunt", () => {
     selectedLeads,
     currentStop,
     nextStop,
+    scanStatus,
+    scanStage,
+    isScanning,
+    isComplete,
+    discoveredCount,
+    strongLeadCount,
+    solarAnalyzedCount,
+    solarAnalysisTarget,
+    totalAvailable,
     setRadius,
     setFilter,
     setMinCapacity,

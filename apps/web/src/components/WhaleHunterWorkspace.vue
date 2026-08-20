@@ -15,21 +15,20 @@
       </p>
     </section>
 
-    <section v-if="progressVisible" class="mt-4 page-surface p-4">
-      <p class="field-label">Scanning {{ scanLocationLabel }}</p>
-      <h3 class="mt-2 text-lg font-semibold text-slate-900">{{ progressTitle }}</h3>
-      <p class="mt-1 text-sm text-slate-500">{{ progressSubtitle }}</p>
-      <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div class="rounded-2xl bg-slate-50 p-3">
-          <span class="text-slate-500">Strong leads</span>
-          <strong class="mt-1 block text-slate-900">{{ scanProgressLeadCount }}</strong>
-        </div>
-        <div class="rounded-2xl bg-slate-50 p-3">
-          <span class="text-slate-500">Solar analyzed</span>
-          <strong class="mt-1 block text-slate-900">{{ analyzedProgressLabel }}</strong>
-        </div>
-      </div>
-    </section>
+    <ScanProgressPanel
+      v-if="showScanProgress"
+      class="mt-4"
+      :location-label="scanLocationLabel"
+      :stage="scanStatus"
+      :is-scanning="hunt.isScanning"
+      :is-complete="hunt.isComplete"
+      :discovered-count="discoveredCount"
+      :strong-lead-count="strongLeadCount"
+      :solar-analyzed-count="solarAnalyzedCount"
+      :solar-analysis-target="solarAnalysisTarget"
+      :error="scanError"
+      @retry="runScan"
+    />
 
     <section class="mt-4 page-surface p-4">
       <div class="flex items-center justify-between gap-3">
@@ -37,8 +36,8 @@
           <p class="field-label">Ranked results</p>
           <p class="mt-1 text-sm text-slate-500">{{ summaryLabel }}</p>
         </div>
-        <button class="touch-target rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm" :disabled="loading" @click="runScan">
-          {{ loading ? "Scanning..." : "Rescan" }}
+        <button class="touch-target rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm" :disabled="hunt.isScanning" @click="runScan">
+          {{ hunt.isScanning ? "Scanning..." : "Rescan" }}
         </button>
       </div>
       <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -80,7 +79,7 @@
     </section>
 
     <section v-if="currentView === 'map'" class="mt-4 grid gap-4">
-      <LoadingCard v-if="loading && results.length === 0" />
+      <LeadCardSkeleton v-if="hunt.isScanning && results.length === 0" />
       <EmptyState
         v-else-if="results.length === 0"
         :title="emptyStateTitle"
@@ -119,24 +118,43 @@
     </section>
 
     <section v-else class="mt-4 grid gap-4">
-      <LoadingCard v-if="loading && results.length === 0" />
+      <template v-if="hunt.isScanning && results.length === 0">
+        <LeadCardSkeleton v-for="item in skeletonCount" :key="`lead-skeleton-${item}`" />
+      </template>
       <EmptyState
-        v-else-if="results.length === 0"
+        v-else-if="results.length === 0 && !hunt.isScanning"
         title="No doors in this radius yet"
         message="Open a wider radius or clear filters."
         action-label="Find Best Doors"
         @action="runScan"
       />
-      <LeadCard
-        v-for="lead in visibleResults"
-        :key="lead.id"
-        :lead="lead"
-        :selected="selectedIds.has(lead.propertyId ?? lead.id)"
-        @navigate="navigateToLead(lead)"
-        @toggle="toggleLead(lead)"
-        @open="openLead(lead)"
-      />
-      <div v-if="results.length > 0" class="page-surface p-4 text-center">
+      <template v-if="visibleResults.length > 0">
+        <LeadCard
+          v-for="lead in visibleResults"
+          :key="lead.id"
+          :lead="lead"
+          :selected="selectedIds.has(lead.propertyId ?? lead.id)"
+          @navigate="navigateToLead(lead)"
+          @toggle="toggleLead(lead)"
+          @open="openLead(lead)"
+        />
+      </template>
+      <template v-if="hunt.isScanning && results.length > 0">
+        <LeadCardSkeleton v-for="item in skeletonCount" :key="`lead-skeleton-inline-${item}`" />
+      </template>
+      <div v-if="hunt.isScanning" class="page-surface flex items-center gap-3 p-4">
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500">
+          <svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" class="opacity-20" stroke="currentColor" stroke-width="3" />
+            <path d="M21 12a9 9 0 0 0-9-9" class="opacity-90" stroke="currentColor" stroke-linecap="round" stroke-width="3" />
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-slate-900">Still analyzing nearby homes</p>
+          <p class="mt-1 text-sm text-slate-500">More results may appear.</p>
+        </div>
+      </div>
+      <div v-if="hunt.isComplete && results.length > 0" class="page-surface p-4 text-center">
         <p class="text-sm font-semibold text-slate-900">{{ loadedResultsLabel }}</p>
         <p v-if="scanResultsHasMore" class="mt-1 text-sm text-slate-500">
           More leads remain in this scan.
@@ -253,6 +271,8 @@ import LeadCard from "./LeadCard.vue";
 import LoadingCard from "./LoadingCard.vue";
 import EmptyState from "./EmptyState.vue";
 import MobileHeader from "./MobileHeader.vue";
+import ScanProgressPanel from "./ScanProgressPanel.vue";
+import LeadCardSkeleton from "./LeadCardSkeleton.vue";
 
 const props = withDefaults(defineProps<{
   initialView?: "list" | "map";
@@ -296,7 +316,20 @@ const results = computed(() => scanResults.value);
 const selectedIds = computed(() => new Set(hunt.selectedPropertyIds));
 const selectedCount = computed(() => selectedIds.value.size);
 const scan = computed(() => hunt.scan);
-const progressVisible = computed(() => Boolean(scanProgress.value || loading.value));
+const scanStatus = computed(() => hunt.scanStatus);
+const showScanProgress = computed(() => Boolean(scanStatus.value || hunt.isScanning || hunt.error));
+const discoveredCount = computed(() => hunt.discoveredCount);
+const strongLeadCount = computed(() => hunt.strongLeadCount);
+const solarAnalyzedCount = computed(() => hunt.solarAnalyzedCount);
+const solarAnalysisTarget = computed(() => hunt.solarAnalysisTarget);
+const scanError = computed(() => {
+  if (hunt.error) return hunt.error;
+  if (scanStatus.value === "FAILED" || scanStatus.value === "DISCOVERY_FAILED") {
+    return "We couldn't finish this scan.";
+  }
+  return null;
+});
+const skeletonCount = computed(() => (results.value.length === 0 ? 3 : 2));
 const scanLocationLabel = computed(() => searchContextStore.contextLabel || "selected location");
 const searchStoreRadiusLabel = computed(() => `${searchContextStore.radiusMiles} mi radius`);
 const currentLatitude = computed(() => resolvedLocation.value?.latitude ?? hunt.lastLatitude ?? null);
@@ -309,51 +342,53 @@ const summary = computed(() => ({
   revisits: results.value.filter((lead) => lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
 }));
 const summaryLabel = computed(() => {
-  if (!scanProgress.value) return "Pick a location, then scan a radius to rank opportunities.";
-  if (scanProgress.value.status === "DATA_COVERAGE_UNAVAILABLE") {
+  if (!scanStatus.value && !hunt.isScanning) return "Pick a location, then scan a radius to rank opportunities.";
+  if (scanStatus.value === "DATA_COVERAGE_UNAVAILABLE") {
     return "Property data isn’t available for this area yet.";
   }
-  if (scanProgress.value.status === "DISCOVERY_FAILED") {
+  if (scanStatus.value === "DISCOVERY_FAILED" || scanStatus.value === "FAILED") {
     return "We couldn’t complete this scan.";
   }
-  if (scanProgress.value.status === "DISCOVERING") {
+  if (scanStatus.value === "DISCOVERING") {
     return "Finding properties";
   }
-  if (scanProgress.value.status === "PRE_RANKING") {
+  if (scanStatus.value === "PRE_RANKING") {
     return "Ranking opportunities";
   }
-  if (scanProgress.value.status === "SOLAR_ANALYSIS") {
-    return `Analyzing solar ${scanProgress.value.metrics.solarAnalyzedCount} / ${scanProgress.value.metrics.prequalifiedCount}`;
+  if (scanStatus.value === "SOLAR_ANALYSIS") {
+    return `Analyzing solar ${solarAnalyzedCount.value} / ${solarAnalysisTarget.value}`;
   }
-  if (results.value.length > 0) {
-    return `${results.value.length} strong leads loaded`;
+  if (scanStatus.value === "FINAL_RANKING") {
+    return "Building your best leads";
   }
-  return `${scan.value?.estimatedCostUsd?.toFixed(2) ?? "0.00"} estimated scan cost · ${scan.value?.analyzedCount ?? 0} analyzed`;
+  if (!hunt.isComplete) {
+    return `${strongLeadCount.value} strong leads found so far`;
+  }
+  return `${results.value.length} strong leads loaded`;
 });
 const progressTitle = computed(() => {
-  if (!scanProgress.value) return "Ready to scan";
-  if (scanProgress.value.status === "DISCOVERY_FAILED") return "Scan failed";
-  if (scanProgress.value.status === "DISCOVERING") return "Finding properties";
-  if (scanProgress.value.status === "PRE_RANKING") return "Ranking opportunities";
-  if (scanProgress.value.status === "SOLAR_ANALYSIS") return "Analyzing solar";
-  if (scanProgress.value.status === "FINAL_RANKING") return "Building final lead list";
-  if (scanProgress.value.status === "DATA_COVERAGE_UNAVAILABLE") return "Property data unavailable";
+  if (!scanStatus.value) return "Ready to scan";
+  if (scanStatus.value === "DISCOVERY_FAILED" || scanStatus.value === "FAILED") return "Scan failed";
+  if (scanStatus.value === "DISCOVERING") return "Finding properties";
+  if (scanStatus.value === "PRE_RANKING") return "Ranking opportunities";
+  if (scanStatus.value === "SOLAR_ANALYSIS") return "Analyzing solar";
+  if (scanStatus.value === "FINAL_RANKING") return "Building final lead list";
+  if (scanStatus.value === "DATA_COVERAGE_UNAVAILABLE") return "Property data unavailable";
   return "Scan complete";
 });
 const progressSubtitle = computed(() => {
-  if (!scanProgress.value) return "Choose a location and scan a radius to rank opportunities.";
-  if (scanProgress.value.status === "DISCOVERY_FAILED") return "Provider discovery failed. Try again.";
-  if (scanProgress.value.status === "DISCOVERING") return "Finding residential properties nearby.";
-  if (scanProgress.value.status === "PRE_RANKING") return "Scoring likely solar candidates.";
-  if (scanProgress.value.status === "SOLAR_ANALYSIS") return `Analyzing solar ${scanProgress.value.metrics.solarAnalyzedCount} / ${scanProgress.value.metrics.prequalifiedCount}`;
-  if (scanProgress.value.status === "DATA_COVERAGE_UNAVAILABLE") return "Property data isn’t available for this area yet.";
+  if (!scanStatus.value) return "Choose a location and scan a radius to rank opportunities.";
+  if (scanStatus.value === "DISCOVERY_FAILED" || scanStatus.value === "FAILED") return "Provider discovery failed. Try again.";
+  if (scanStatus.value === "DISCOVERING") return "Finding residential properties nearby.";
+  if (scanStatus.value === "PRE_RANKING") return "Scoring likely solar candidates.";
+  if (scanStatus.value === "SOLAR_ANALYSIS") return `Analyzing solar ${solarAnalyzedCount.value} / ${solarAnalysisTarget.value}`;
+  if (scanStatus.value === "DATA_COVERAGE_UNAVAILABLE") return "Property data isn’t available for this area yet.";
   return results.value.length > 0
     ? `${results.value.length} strong leads found`
     : "No strong leads found yet.";
 });
-const scanProgressLeadCount = computed(() => scanProgress.value?.metrics.resultsFound ?? results.value.length ?? 0);
 const loadedResultsLabel = computed(() => {
-  const total = scanResultsTotal.value || scanProgress.value?.metrics.resultsFound || results.value.length;
+  const total = scanResultsTotal.value || strongLeadCount.value || results.value.length;
   if (total <= 0) {
     return "No leads loaded yet";
   }
@@ -361,10 +396,6 @@ const loadedResultsLabel = computed(() => {
     return `${visibleResults.value.length} shown · ${results.value.length} loaded of ${total}`;
   }
   return `${results.value.length} of ${total} leads loaded`;
-});
-const analyzedProgressLabel = computed(() => {
-  if (!scanProgress.value) return "--";
-  return `${scanProgress.value.metrics.solarAnalyzedCount} / ${scanProgress.value.metrics.prequalifiedCount}`;
 });
 const nextRadiusSuggestion = computed<10 | 20 | null>(() => {
   if (hunt.radiusMiles === 5) return 10;
