@@ -7,6 +7,7 @@ import {
   createRoute,
   getDiscoveryScanResultsPage,
   getDealBrief,
+  getLeadOutcomes,
   getPropertyDetail,
   getRevenueCommandCenter,
   getRouteNext,
@@ -453,6 +454,60 @@ test("lead outcomes persist across dashboard refreshes", async () => {
   const dashboard = await getTodayDashboard(repository);
   const lead = dashboard.leads.find((item) => item.propertyId === analysis.property.id);
   assert.equal(lead?.outcome, "NOT_HOME");
+});
+
+test("lead outcomes endpoint returns persisted dispositions only", async () => {
+  const repository = new InMemorySolarRepository();
+  const geocoder = new GoogleMapsGeocoder({
+    apiKey: "test-key",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          status: "OK",
+          results: [
+            {
+              formatted_address: "77 Queue Ave, Demo, PA 00000, USA",
+              place_id: "place-777",
+              geometry: {
+                location: { lat: 40.3, lng: -79.4 },
+                location_type: "ROOFTOP",
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+  });
+  const solarProvider = new GoogleSolarDataProvider({
+    apiKey: "test-key",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify(fixture),
+        { status: 200 },
+      ),
+  });
+
+  const analysis = await analyzeProperty(
+    {
+      address: "77 Queue Ave, Demo, PA",
+      municipality: "Demo",
+      county: "Demo",
+      state: "PA",
+      postalCode: "00000",
+    },
+    repository,
+    { geocoder, solarProvider },
+  );
+
+  const saved = await updateLeadOutcome(analysis.property.id, "SAVED", null, repository);
+  assert.equal(saved?.outcome, "SAVED");
+  assert.equal(typeof saved?.updatedAt, "string");
+
+  const leads = await getLeadOutcomes(repository, { outcome: "SAVED" });
+  assert.equal(leads.length, 1);
+  assert.equal(leads[0]?.propertyId, analysis.property.id);
+  assert.equal(leads[0]?.outcome, "SAVED");
+  assert.equal(typeof leads[0]?.updatedAt, "string");
 });
 
 test("command center and deal brief expose next best action and revenue metrics", async () => {

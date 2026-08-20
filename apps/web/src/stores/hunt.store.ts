@@ -7,11 +7,13 @@ import type {
   DiscoveryScanResultsPage,
   DiscoveryScanStatusResponse,
   LeadOutcome,
+  LeadOutcomeCard,
   RouteNextResponse,
   RoutePlan,
 } from "@solar/contracts";
-import { createRoute, getDiscoveryScan, getDiscoveryScanResults, getRouteNext, startDiscoveryScan, updateLeadOutcome } from "../services/api";
+import { createRoute, getDiscoveryScan, getDiscoveryScanResults, getRouteNext, startDiscoveryScan } from "../services/api";
 import { useSearchContextStore } from "./search-context.store";
+import { useLeadOutcomeStore } from "./lead-outcome.store";
 
 const defaultFilters: DiscoveryScanFilters = {
   whaleCandidates: false,
@@ -282,7 +284,8 @@ export const useHuntStore = defineStore("hunt", () => {
   }
 
   async function recordOutcome(propertyId: string, outcome: LeadOutcome["outcome"], notes: string | null = null) {
-    await updateLeadOutcome(propertyId, outcome, notes);
+    const leadOutcomeStore = useLeadOutcomeStore();
+    await leadOutcomeStore.setOutcome(propertyId, outcome, { notes });
     await refreshRoute();
     if (lastLatitude.value != null && lastLongitude.value != null) {
       await runScan({ latitude: lastLatitude.value, longitude: lastLongitude.value });
@@ -290,14 +293,18 @@ export const useHuntStore = defineStore("hunt", () => {
   }
 
   async function setLeadDisposition(propertyId: string, outcome: LeadOutcome["outcome"]) {
+    const leadOutcomeStore = useLeadOutcomeStore();
     const previousOutcome = findCurrentOutcome(propertyId) ?? "NEW";
+    const lead = scanResults.value.find((item) => (item.propertyId ?? item.id) === propertyId) ?? null;
+    const optimisticLead: LeadOutcomeCard | null = lead ? { ...lead, updatedAt: new Date().toISOString() } : null;
     patchLeadOutcome(propertyId, outcome);
     try {
-      const updated = await updateLeadOutcome(propertyId, outcome, null);
+      const updated = await leadOutcomeStore.setOutcome(propertyId, outcome, { lead: optimisticLead });
       lastSwipeAction.value = {
         propertyId,
         previousOutcome,
         nextOutcome: outcome,
+        lead: optimisticLead,
       };
       return updated;
     } catch (cause) {
@@ -311,10 +318,13 @@ export const useHuntStore = defineStore("hunt", () => {
     if (!action) {
       return null;
     }
+    const leadOutcomeStore = useLeadOutcomeStore();
     lastSwipeAction.value = null;
     patchLeadOutcome(action.propertyId, action.previousOutcome);
     try {
-      return await updateLeadOutcome(action.propertyId, action.previousOutcome, null);
+      return await leadOutcomeStore.setOutcome(action.propertyId, action.previousOutcome, {
+        lead: action.lead,
+      });
     } catch (cause) {
       patchLeadOutcome(action.propertyId, action.nextOutcome);
       lastSwipeAction.value = action;
@@ -385,7 +395,7 @@ export const useHuntStore = defineStore("hunt", () => {
     generateRoute,
     refreshRoute,
     recordOutcome,
-    setLeadDisposition,
+  setLeadDisposition,
     undoLastSwipeDisposition,
     skipCurrentStop,
   };
@@ -549,4 +559,5 @@ interface LeadDispositionAction {
   propertyId: string;
   previousOutcome: LeadOutcome["outcome"];
   nextOutcome: LeadOutcome["outcome"];
+  lead: LeadOutcomeCard | null;
 }

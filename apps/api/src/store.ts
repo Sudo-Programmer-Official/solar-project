@@ -71,6 +71,7 @@ import type {
   TodayLeadCard,
   ConversationInsight,
   HomeownerConfirmationState,
+  LeadOutcomeCard,
   PropertyVisualSignal,
   UsageProfile,
 } from "../../../packages/contracts/src/index";
@@ -481,7 +482,7 @@ export async function getTodayDashboard(
   const properties = await repository.listProperties();
   const analyzedLeads: TodayLeadCard[] = [];
 
-  for (const property of properties.slice(0, 12)) {
+  for (const property of properties) {
     const detail = await getPropertyDetail(property.id, repository);
     if (!detail) continue;
     analyzedLeads.push(mapAnalyzeResultToLeadCard(detail, false));
@@ -506,6 +507,39 @@ export async function getTodayDashboard(
       { key: "needs_bill", label: "Needs Bill", count: summary.needsBill },
     ],
     leads: combinedLeads.sort((left, right) => right.opportunityScore - left.opportunityScore),
+  };
+}
+
+export async function getLeadOutcomes(
+  repository: SolarRepository = defaultRepository,
+  options: { outcome?: "ALL" | "SAVED" | "SKIPPED" | "REVISIT" } = {},
+): Promise<LeadOutcomeCard[]> {
+  const leadOutcomes = await repository.listLeadOutcomes();
+  const filtered = options.outcome && options.outcome !== "ALL"
+    ? leadOutcomes.filter((leadOutcome) => leadOutcome.outcome === options.outcome)
+    : leadOutcomes;
+
+  const cards = await Promise.all(
+    filtered.map(async (leadOutcome) => {
+      const detail = await getPropertyDetail(leadOutcome.propertyId, repository);
+      if (!detail) {
+        return null;
+      }
+      return buildLeadOutcomeCard(detail, leadOutcome.updatedAt);
+    }),
+  );
+
+  return cards.filter((card): card is LeadOutcomeCard => card != null);
+}
+
+function buildLeadOutcomeCard(result: AnalyzeResult, updatedAt: string): LeadOutcomeCard {
+  const lead = mapAnalyzeResultToLeadCard(result, false);
+  return {
+    ...lead,
+    updatedAt,
+    imageryDate: result.solarAssessment.imageryDate ?? null,
+    imageryProcessedDate: result.solarAssessment.imageryProcessedDate ?? null,
+    imageryQuality: result.solarAssessment.imageryQuality ?? null,
   };
 }
 
@@ -3554,6 +3588,7 @@ async function buildLeadOutcome(property: Property, repository: SolarRepository)
     outcome: "NEW",
     notes: null,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   return repository.upsertLeadOutcome(outcome);
 }

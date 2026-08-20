@@ -15,6 +15,8 @@
     "typecheck": "npm run typecheck:web && tsc -p tsconfig.json --noEmit",
     "typecheck:web": "npm run typecheck --workspace @solar/web",
     "test": "node scripts/run-tests.mjs",
+    "test:browser": "playwright test",
+    "qa:mobile-hunt": "playwright test tests/mobile-swipe-hunt.spec.ts",
     "build": "npm run build:web && tsc -p tsconfig.build.json",
     "build:web": "npm run build --workspace @solar/web",
     "dev": "node scripts/dev.mjs",
@@ -27,6 +29,7 @@
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^26.2.0",
     "@types/pg": "^8.21.0",
     "tsx": "^4.19.0",

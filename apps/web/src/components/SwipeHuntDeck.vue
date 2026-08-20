@@ -1,5 +1,5 @@
 <template>
-  <section class="grid gap-4">
+  <section class="grid gap-4" data-testid="mobile-swipe-hunt">
     <div class="page-surface p-4">
       <div class="flex items-start justify-between gap-3">
         <div>
@@ -34,6 +34,7 @@
             :style="cardStyle"
           >
             <LeadCard
+              data-testid="swipe-card"
               :lead="lead"
               compact
               @navigate="emitNavigate"
@@ -43,13 +44,13 @@
         </div>
 
         <div class="grid grid-cols-3 gap-2">
-          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-rose-600 shadow-sm" type="button" @click="swipeSkip">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-rose-600 shadow-sm" type="button" data-testid="swipe-skip" @click="swipeSkip">
             X Skip
           </button>
-          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" type="button" @click="emitNavigate">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" type="button" data-testid="swipe-navigate" @click="emitNavigate">
             Navigate
           </button>
-          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-emerald-700 shadow-sm" type="button" @click="swipeSave">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-emerald-700 shadow-sm" type="button" data-testid="swipe-save" @click="swipeSave">
             ♥ Save
           </button>
         </div>
@@ -72,6 +73,7 @@
             class="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm"
             type="button"
             :disabled="loadingMore"
+            data-testid="swipe-load-more"
             @click="$emit('load-more')"
           >
             {{ loadingMore ? "Loading..." : "Load more leads" }}
@@ -80,6 +82,7 @@
             v-if="nextRadiusSuggestion != null"
             class="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm"
             type="button"
+            data-testid="swipe-expand-radius"
             @click="$emit('expand-radius')"
           >
             Expand to {{ nextRadiusSuggestion }} mi

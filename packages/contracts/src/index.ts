@@ -364,6 +364,14 @@ export interface LeadOutcome {
     | "INSTALLED";
   notes?: string | null;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeadOutcomeCard extends TodayLeadCard {
+  updatedAt: string;
+  imageryDate?: string | null;
+  imageryProcessedDate?: string | null;
+  imageryQuality?: string | null;
 }
 
 export type DealStage =

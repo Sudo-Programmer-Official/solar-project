@@ -328,7 +328,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { ElNotification } from "element-plus";
 import type { DiscoveryScanLead, LocationResolveResponse } from "@solar/contracts";
@@ -352,6 +352,7 @@ const props = withDefaults(defineProps<{
   initialView: "list",
 });
 
+const route = useRoute();
 const router = useRouter();
 const hunt = useHuntStore();
 const searchContextStore = useSearchContextStore();
@@ -360,7 +361,8 @@ const { openDirections } = useLeadActions();
 const { scanResults, loading, routeLoading, scanProgress, scanResultsTotal, scanResultsHasMore, scanResultsLoading, swipeDeckLead, swipeDeckResults, swipeReviewLabel, swipeSavedCount, swipeRemainingCount } = storeToRefs(hunt);
 const isSwipeHuntMode = computed(() => router.currentRoute.value.path === "/hunt");
 const isMobileViewport = ref(false);
-const showSwipeDeck = computed(() => isSwipeHuntMode.value && isMobileViewport.value);
+const mobileViewMode = computed(() => (typeof route.query.view === "string" ? route.query.view : null));
+const showSwipeDeck = computed(() => isSwipeHuntMode.value && isMobileViewport.value && mobileViewMode.value !== "list");
 const currentView = ref<"list" | "map">(props.initialView);
 const selectedPinId = ref<string | null>(null);
 const activeClusterKey = ref<string | null>(null);
@@ -557,6 +559,16 @@ onMounted(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
 });
+
+watch(
+  () => route.query.view,
+  (view) => {
+    if (view === "map" || view === "list") {
+      currentView.value = view;
+    }
+  },
+  { immediate: true },
+);
 
 onUnmounted(() => {
   window.removeEventListener("resize", syncViewport);

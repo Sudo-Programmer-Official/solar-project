@@ -9,6 +9,7 @@ import type {
   DiscoveryScanStatus,
   DiscoveryScanStatusResponse,
   LeadOutcome,
+  LeadOutcomeCard,
   LocationResolveRequest,
   LocationResolveResponse,
   LocationReverseRequest,
@@ -167,6 +168,10 @@ export async function getCapabilities(): Promise<ImageryCapabilitiesResponse | n
 
 export async function getTopLeads(): Promise<TodayDashboard | null> {
   return requestJson<TodayDashboard>("/api/v1/leads/top");
+}
+
+export async function getLeadOutcomes(outcome: "ALL" | "SAVED" | "SKIPPED" | "REVISIT" = "ALL"): Promise<LeadOutcomeCard[] | null> {
+  return requestJson<LeadOutcomeCard[]>(`/api/v1/lead-outcomes?outcome=${encodeURIComponent(outcome)}`);
 }
 
 export async function resolveLocation(body: LocationResolveRequest): Promise<LocationResolveResponse | null> {

@@ -1,13 +1,21 @@
 import { buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl } from "../services/imagery";
 import { ElNotification } from "element-plus";
-import type { LeadOutcome } from "@solar/contracts";
-import { useLeadStore } from "../stores/lead.store";
+import type { LeadOutcome, LeadOutcomeCard } from "@solar/contracts";
+import { useLeadOutcomeStore } from "../stores/lead-outcome.store";
 
 export function useLeadActions() {
-  const leadStore = useLeadStore();
+  const leadOutcomeStore = useLeadOutcomeStore();
 
-  const updateOutcome = async (propertyId: string, outcome: LeadOutcome["outcome"], notes: string | null = null) => {
-    const updated = await leadStore.refreshLeadOutcome(propertyId, outcome, notes);
+  const updateOutcome = async (
+    propertyId: string,
+    outcome: LeadOutcome["outcome"],
+    lead: LeadOutcomeCard | null = null,
+    notes: string | null = null,
+  ) => {
+    const updated = await leadOutcomeStore.setOutcome(propertyId, outcome, {
+      lead,
+      notes,
+    });
     ElNotification({
       title: "Lead updated",
       message: `Outcome saved as ${outcome.replaceAll("_", " ").toLowerCase()}.`,

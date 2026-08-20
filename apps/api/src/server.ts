@@ -8,6 +8,7 @@ import {
   getPropertyAnalysisDebug,
   getPropertyDetail,
   getPropertyDataQuality,
+  getLeadOutcomes,
   getRevenueCommandCenter,
   getTodayDashboard,
   listPermits,
@@ -150,6 +151,19 @@ export function createServer(repository?: SolarRepository, options: CreateServer
 
       if (req.method === "GET" && url.pathname === "/api/v1/leads/top") {
         sendJson(res, 200, await getTodayDashboard(repository), corsHeaders);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/v1/lead-outcomes") {
+        const outcome = typeof url.searchParams.get("outcome") === "string" ? url.searchParams.get("outcome") : null;
+        sendJson(
+          res,
+          200,
+          await getLeadOutcomes(repository, {
+            outcome: outcome === "SAVED" || outcome === "SKIPPED" || outcome === "REVISIT" ? outcome : "ALL",
+          }),
+          corsHeaders,
+        );
         return;
       }
 

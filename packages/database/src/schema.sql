@@ -242,7 +242,8 @@ CREATE TABLE IF NOT EXISTS lead_outcomes (
   rep_id TEXT,
   outcome TEXT NOT NULL,
   notes TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_lead_outcomes_outcome ON lead_outcomes (outcome);

@@ -1,10 +1,14 @@
 <template>
   <main class="px-4 pb-4">
-    <MobileHeader eyebrow="SolarScout" title="Leads" subtitle="Fast outcome updates for the field." />
+    <MobileHeader
+      eyebrow="SolarScout"
+      title="Leads"
+      subtitle="Persisted outcomes across saved, skipped, and revisit leads."
+    />
 
     <section class="page-surface p-4">
-      <p class="field-label">Current context</p>
-      <p class="mt-1 text-lg font-semibold text-slate-900">{{ searchContextStore.contextLabel || "Choose a location" }}</p>
+      <p class="field-label">Lead history</p>
+      <p class="mt-1 text-lg font-semibold text-slate-900">Global lead queue</p>
       <p class="mt-1 text-sm text-slate-500">{{ leadCountLabel }}</p>
     </section>
 
@@ -25,37 +29,67 @@
 
     <section class="mt-4 grid gap-4">
       <LoadingCard v-if="loading" />
-      <LeadCard
-        v-for="lead in tabbedLeads"
-        :key="lead.id"
-        :lead="lead"
-        :selected="selectedIds.has(lead.propertyId ?? lead.id)"
-        @navigate="navigate(lead)"
-        @toggle="toggleLead(lead)"
-        @open="openLead(lead)"
+
+      <EmptyState
+        v-else-if="errorMessage"
+        title="Couldn't load your leads."
+        :message="errorMessage"
+        action-label="Retry"
+        @action="reload"
       />
+
+      <EmptyState
+        v-else-if="tabbedLeads.length === 0"
+        title="No leads yet."
+        message="Saved, skipped, and revisit outcomes will appear here after you swipe or update a property."
+      />
+
+      <template v-else>
+        <div v-for="lead in tabbedLeads" :key="lead.id" class="space-y-2">
+          <LeadCard
+            :lead="lead"
+            :selected="selectedIds.has(lead.propertyId ?? lead.id)"
+            @navigate="navigate(lead)"
+            @toggle="toggleLead(lead)"
+            @open="openLead(lead)"
+          />
+
+          <div class="page-surface flex flex-wrap items-center gap-2 p-3">
+            <p class="mr-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Change status</p>
+            <button
+              v-for="option in statusActions"
+              :key="option.outcome"
+              class="rounded-full border px-3 py-2 text-xs font-semibold transition"
+              :class="lead.outcome === option.outcome ? activeOutcomeClasses : inactiveOutcomeClasses"
+              type="button"
+              @click="setOutcome(lead, option.outcome)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+        </div>
+      </template>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
-import type { LeadOutcome } from "@solar/contracts";
-import { useLeadStore } from "../stores/lead.store";
+import type { LeadOutcome, LeadOutcomeCard } from "@solar/contracts";
+import { useLeadOutcomeStore } from "../stores/lead-outcome.store";
 import LeadCard from "../components/LeadCard.vue";
 import MobileHeader from "../components/MobileHeader.vue";
 import LoadingCard from "../components/LoadingCard.vue";
+import EmptyState from "../components/EmptyState.vue";
 import { useLeadActions } from "../composables/useLeadActions";
-import { useSearchContextStore } from "../stores/search-context.store";
 import { useHuntStore } from "../stores/hunt.store";
 
 const router = useRouter();
-const leadStore = useLeadStore();
+const leadOutcomeStore = useLeadOutcomeStore();
 const hunt = useHuntStore();
-const searchContextStore = useSearchContextStore();
-const { filteredLeads, loading, summary } = storeToRefs(leadStore);
+const { outcomes, loading, error, summary } = storeToRefs(leadOutcomeStore);
 const { updateOutcome, openDirections } = useLeadActions();
 const selectedIds = computed(() => new Set(hunt.selectedPropertyIds));
 const tabs = [
@@ -67,52 +101,55 @@ const tabs = [
 const activeTab = ref<(typeof tabs)[number]["key"]>("all");
 const activeTabClasses = "border-primary-300 bg-primary-50 text-slate-900 shadow-[0_0_0_1px_rgba(34,211,238,0.18)]";
 const inactiveTabClasses = "border-slate-200 bg-white text-slate-700 hover:border-primary-200 hover:bg-slate-50";
-const tabbedLeads = computed(() => filteredLeads.value.filter((lead) => matchesTab(lead, activeTab.value)));
+const activeOutcomeClasses = "border-primary-300 bg-primary-50 text-slate-900";
+const inactiveOutcomeClasses = "border-slate-200 bg-white text-slate-700 hover:border-primary-200 hover:bg-slate-50";
+const statusActions = [
+  { outcome: "SAVED", label: "Saved" },
+  { outcome: "SKIPPED", label: "Skipped" },
+  { outcome: "REVISIT", label: "Revisit" },
+] as const satisfies ReadonlyArray<{ outcome: LeadOutcome["outcome"]; label: string }>;
+
+const tabbedLeads = computed(() => outcomes.value.filter((lead) => matchesTab(lead, activeTab.value)));
+const leadCountLabel = computed(
+  () => `${summary.value.all} leads · ${summary.value.saved} saved · ${summary.value.skipped} skipped · ${summary.value.revisit} revisits`,
+);
+const errorMessage = computed(() => error.value ?? null);
 
 onMounted(async () => {
-  if (leadStore.leads.length === 0) {
-    await leadStore.loadTopLeads();
-  }
+  await reload();
 });
 
-watch(
-  () => searchContextStore.context,
-  () => {
-    void leadStore.loadTopLeads();
-  },
-  { deep: true },
-);
-
-const leadCountLabel = computed(
-  () => `${tabbedLeads.value.length} leads · ${summary.value?.whaleCandidates ?? 0} whales · ${summary.value?.revisits ?? 0} revisits`,
-);
-
-function navigate(lead: { propertyId?: string | null; address: string }) {
-  const fullLead = leadStore.leadById(lead.propertyId ?? encodeURIComponent(lead.address));
-  if (fullLead?.latitude != null && fullLead.longitude != null) {
-    openDirections(fullLead.latitude, fullLead.longitude);
-    return;
+async function reload() {
+  try {
+    await leadOutcomeStore.fetchOutcomes("ALL");
+  } catch {
+    // Error state is surfaced through the store.
   }
-  router.push(`/properties/${lead.propertyId ?? encodeURIComponent(lead.address)}`);
 }
 
-function openLead(lead: { propertyId?: string | null; address: string }) {
+function navigate(lead: LeadOutcomeCard) {
+  const propertyId = lead.propertyId ?? lead.id;
+  if (lead.latitude != null && lead.longitude != null) {
+    openDirections(lead.latitude, lead.longitude);
+    return;
+  }
+  router.push(`/properties/${propertyId}`);
+}
+
+function openLead(lead: LeadOutcomeCard) {
   navigate(lead);
 }
 
-async function setOutcome(lead: { propertyId?: string | null; address: string }, outcome: LeadOutcome["outcome"]) {
-  await updateOutcome(lead.propertyId ?? encodeURIComponent(lead.address), outcome);
-  await leadStore.loadTopLeads();
+async function setOutcome(lead: LeadOutcomeCard, outcome: LeadOutcome["outcome"]) {
+  const propertyId = lead.propertyId ?? lead.id;
+  await updateOutcome(propertyId, outcome, lead);
 }
 
-function toggleLead(lead: { propertyId?: string | null; address: string }) {
-  hunt.selectLead(lead.propertyId ?? encodeURIComponent(lead.address));
+function toggleLead(lead: LeadOutcomeCard) {
+  hunt.selectLead(lead.propertyId ?? lead.id);
 }
 
-function matchesTab(
-  lead: { outcome: string },
-  tab: (typeof tabs)[number]["key"],
-) {
+function matchesTab(lead: LeadOutcomeCard, tab: (typeof tabs)[number]["key"]) {
   if (tab === "all") {
     return true;
   }

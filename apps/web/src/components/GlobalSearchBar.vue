@@ -1,13 +1,70 @@
 <template>
   <div class="border-b border-slate-200 bg-white/95 backdrop-blur">
-    <div class="mx-auto max-w-6xl px-4 py-3">
-      <div class="flex flex-col gap-3">
+    <div class="mx-auto max-w-6xl px-3 py-2 md:px-4 md:py-3">
+      <div class="grid items-center gap-2 md:hidden md:gap-3">
+        <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+          <span class="shrink-0 text-[21px] font-semibold tracking-tight text-slate-900">SolarScout</span>
+
+          <form class="min-w-0" @submit.prevent="searchLocation">
+            <label class="relative block" for="global-search-input-mobile">
+              <span class="sr-only">Search location</span>
+              <input
+                id="global-search-input-mobile"
+                v-model="query"
+                class="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 pr-12 text-sm text-slate-900 outline-none placeholder:text-slate-400 shadow-sm"
+                type="search"
+                :placeholder="placeholder"
+                autocomplete="off"
+              />
+              <el-tooltip content="Use current location" placement="bottom" :show-after="250">
+                <button
+                  class="absolute right-1.5 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100 disabled:opacity-50"
+                  type="button"
+                  :disabled="searchStore.resolvingLocation"
+                  @click="useCurrentLocation"
+                >
+                  <el-icon :size="18">
+                    <LocationFilled />
+                  </el-icon>
+                </button>
+              </el-tooltip>
+            </label>
+          </form>
+
+          <el-dropdown trigger="click" placement="bottom-end" @command="handleMobileCommand">
+            <button
+              class="touch-target relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-xl font-semibold leading-none text-slate-700 shadow-sm transition hover:bg-slate-100"
+              type="button"
+              aria-label="Open search actions"
+            >
+              ⋯
+              <span
+                v-if="searchStore.filterCount"
+                class="absolute -right-1 -top-1 min-w-5 rounded-full bg-primary-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white"
+              >
+                {{ searchStore.filterCount }}
+              </span>
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="filters">Filters</el-dropdown-item>
+                <el-dropdown-item command="current-location">Use current location</el-dropdown-item>
+                <el-dropdown-item command="rescan">Refresh / Rescan</el-dropdown-item>
+                <el-dropdown-item command="list-view">List view if available</el-dropdown-item>
+                <el-dropdown-item command="swipe-view">Swipe view if needed later</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </div>
+
+      <div class="hidden md:flex md:flex-col md:gap-3">
         <div class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-2">
             <span class="text-lg font-semibold tracking-tight text-slate-900">SolarScout</span>
           </div>
           <button
-            class="touch-target rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 md:hidden"
+            class="touch-target rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700"
             type="button"
             @click="filtersOpen = true"
           >
@@ -54,10 +111,6 @@
             </span>
           </button>
         </form>
-
-        <div v-if="contextLine" class="text-sm text-slate-400">
-          <span class="font-medium text-slate-200">{{ contextLine }}</span>
-        </div>
       </div>
     </div>
 
@@ -199,7 +252,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { Check, LocationFilled } from "@element-plus/icons-vue";
-import { ElIcon, ElNotification, ElTooltip } from "element-plus";
+import { ElDropdown, ElDropdownItem, ElDropdownMenu, ElIcon, ElNotification, ElTooltip } from "element-plus";
 import { useRouter } from "vue-router";
 import { useSearchContextStore } from "../stores/search-context.store";
 import { useHuntStore } from "../stores/hunt.store";
@@ -402,6 +455,28 @@ type FilterToggleKey = typeof opportunityFilters[number]["key"] | typeof propert
 
 function booleanFilterActive(key: FilterToggleKey) {
   return Boolean(searchStore.filters[key]);
+}
+
+async function handleMobileCommand(command: string) {
+  if (command === "filters") {
+    filtersOpen.value = true;
+    return;
+  }
+  if (command === "current-location") {
+    await useCurrentLocation();
+    return;
+  }
+  if (command === "rescan") {
+    await findBestDoors({ quiet: true });
+    return;
+  }
+  if (command === "list-view") {
+    await router.push({ path: "/hunt", query: { ...router.currentRoute.value.query, view: "list" } });
+    return;
+  }
+  if (command === "swipe-view") {
+    await router.push({ path: "/hunt", query: { ...router.currentRoute.value.query, view: "swipe" } });
+  }
 }
 
 function syncDraftFromLive() {

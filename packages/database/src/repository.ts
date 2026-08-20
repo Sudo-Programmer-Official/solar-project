@@ -30,6 +30,7 @@ export interface SolarRepository {
   replacePermitRecords(propertyId: string, records: PermitRecord[]): Promise<PermitRecord[]>;
   upsertLeadOutcome(input: LeadOutcomeUpsertInput): Promise<LeadOutcome>;
   getLeadOutcomeByPropertyId(propertyId: string): Promise<LeadOutcome | null>;
+  listLeadOutcomes(): Promise<LeadOutcome[]>;
   upsertOpportunityAssessment(input: OpportunityAssessmentUpsertInput): Promise<OpportunityAssessment>;
   getOpportunityAssessmentByPropertyId(propertyId: string): Promise<OpportunityAssessment | null>;
   listPermits(propertyId: string): Promise<PermitRecord[]>;
@@ -92,7 +93,7 @@ export interface UsageProfileUpsertInput extends Omit<UsageProfile, "id" | "crea
   createdAt?: string;
 }
 
-export interface LeadOutcomeUpsertInput extends Omit<LeadOutcome, "id" | "createdAt"> {
+export interface LeadOutcomeUpsertInput extends Omit<LeadOutcome, "id" | "createdAt" | "updatedAt"> {
   id: string;
   createdAt?: string;
 }
@@ -251,6 +252,7 @@ export class InMemorySolarRepository implements SolarRepository {
     const outcome: LeadOutcome = {
       ...input,
       createdAt: input.createdAt ?? this.leadOutcomes.get(input.id)?.createdAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     this.leadOutcomes.set(outcome.id, outcome);
     return outcome;
@@ -258,6 +260,10 @@ export class InMemorySolarRepository implements SolarRepository {
 
   async getLeadOutcomeByPropertyId(propertyId: string): Promise<LeadOutcome | null> {
     return [...this.leadOutcomes.values()].find((outcome) => outcome.propertyId === propertyId) ?? null;
+  }
+
+  async listLeadOutcomes(): Promise<LeadOutcome[]> {
+    return [...this.leadOutcomes.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   async upsertOpportunityAssessment(input: OpportunityAssessmentUpsertInput): Promise<OpportunityAssessment> {
@@ -861,19 +867,21 @@ export class PostgresSolarRepository implements SolarRepository {
   async upsertLeadOutcome(input: LeadOutcomeUpsertInput): Promise<LeadOutcome> {
     const rows = await this.client.query<LeadOutcome>(
       `
-      INSERT INTO lead_outcomes (id, property_id, rep_id, outcome, notes, created_at)
-      VALUES ($1,$2,$3,$4,$5,COALESCE($6, NOW()))
+      INSERT INTO lead_outcomes (id, property_id, rep_id, outcome, notes, created_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,COALESCE($6, NOW()), NOW())
       ON CONFLICT (id) DO UPDATE SET
         rep_id = EXCLUDED.rep_id,
         outcome = EXCLUDED.outcome,
-        notes = EXCLUDED.notes
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
       RETURNING
         id,
         property_id AS "propertyId",
         rep_id AS "repId",
         outcome,
         notes,
-        created_at AS "createdAt"
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
       `,
       [input.id, input.propertyId, input.repId ?? null, input.outcome, input.notes ?? null, input.createdAt ?? null],
     );
@@ -889,7 +897,8 @@ export class PostgresSolarRepository implements SolarRepository {
         rep_id AS "repId",
         outcome,
         notes,
-        created_at AS "createdAt"
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
       FROM lead_outcomes
       WHERE property_id = $1
       ORDER BY created_at DESC
@@ -898,6 +907,24 @@ export class PostgresSolarRepository implements SolarRepository {
       [propertyId],
     );
     return rows.rows.length > 0 ? normalizeLeadOutcomeRow(rows.rows[0]) : null;
+  }
+
+  async listLeadOutcomes(): Promise<LeadOutcome[]> {
+    const rows = await this.client.query<LeadOutcome>(
+      `
+      SELECT
+        id,
+        property_id AS "propertyId",
+        rep_id AS "repId",
+        outcome,
+        notes,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM lead_outcomes
+      ORDER BY updated_at DESC, created_at DESC
+      `,
+    );
+    return rows.rows.map(normalizeLeadOutcomeRow);
   }
 
   async upsertOpportunityAssessment(input: OpportunityAssessmentUpsertInput): Promise<OpportunityAssessment> {
@@ -1088,7 +1115,12 @@ function normalizeUsageProfileRow(row: UsageProfile): UsageProfile {
 }
 
 function normalizeLeadOutcomeRow(row: LeadOutcome): LeadOutcome {
-  return row;
+  return {
+    ...row,
+    repId: row.repId ?? null,
+    notes: row.notes ?? null,
+    updatedAt: row.updatedAt ?? row.createdAt,
+  };
 }
 
 function normalizeOpportunityAssessmentRow(row: OpportunityAssessment): OpportunityAssessment {
