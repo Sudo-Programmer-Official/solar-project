@@ -53,7 +53,7 @@ export function createServer(repository?: SolarRepository, options: CreateServer
     const corsHeaders = buildCorsHeaders(corsOrigin);
 
     if (req.method === "OPTIONS") {
-      res.writeHead(204, corsHeaders);
+      res.writeHead(204, { ...jsonHeaders, ...corsHeaders });
       res.end();
       return;
     }
@@ -504,7 +504,7 @@ function isAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
   }
   try {
     const parsed = new URL(origin);
-    if (parsed.hostname.endsWith(".onrender.com")) {
+    if (parsed.hostname.endsWith(".onrender.com") || parsed.hostname.endsWith(".vercel.app")) {
       return true;
     }
   } catch {
