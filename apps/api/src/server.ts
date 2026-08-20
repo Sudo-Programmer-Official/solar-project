@@ -499,7 +499,18 @@ function resolveAllowedOrigins(configuredOrigins: string[] = []): string[] {
 }
 
 function isAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
-  return allowedOrigins.includes(origin);
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+  try {
+    const parsed = new URL(origin);
+    if (parsed.hostname.endsWith(".onrender.com")) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.js")) {
