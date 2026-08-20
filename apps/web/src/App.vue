@@ -38,6 +38,7 @@ const searchStore = useSearchContextStore();
 const showScanProgress = computed(() => Boolean(hunt.scanStatus || hunt.isScanning || hunt.error));
 const scanLocationLabel = computed(() => searchStore.contextLabel || "selected location");
 const scanError = computed(() => {
+  if (hunt.scan?.error) return formatDiscoveryScanError(hunt.scan.error);
   if (hunt.error) return hunt.error;
   if (hunt.scanStatus === "FAILED" || hunt.scanStatus === "DISCOVERY_FAILED") {
     return "We couldn't finish this scan.";
@@ -53,5 +54,30 @@ async function retryScan() {
     radiusMiles: searchStore.radiusMiles,
     filters: searchStore.filters,
   });
+}
+
+function formatDiscoveryScanError(error: { code: string; message: string } | null): string | null {
+  if (!error) {
+    return null;
+  }
+  switch (error.code) {
+    case "DATA_COVERAGE_UNAVAILABLE":
+      return "No residential data is available for this area yet.";
+    case "PROVIDER_TEMPORARY_FAILURE":
+      return "One of our data providers is temporarily unavailable.";
+    case "DATABASE_UNAVAILABLE":
+    case "DATABASE_SCHEMA_MISMATCH":
+    case "DATABASE_WRITE_FAILED":
+    case "PERSISTENCE_FAILED":
+      return "We couldn't access lead data right now.";
+    case "GEOCODING_REQUEST_FAILED":
+      return "We couldn't resolve that location.";
+    case "GOOGLE_SOLAR_REQUEST_FAILED":
+      return "Solar enrichment could not complete.";
+    case "DISCOVERY_PROVIDER_FAILED":
+      return "Residential data discovery could not complete.";
+    default:
+      return error.message;
+  }
 }
 </script>

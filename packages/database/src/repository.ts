@@ -306,17 +306,56 @@ export class InMemorySolarRepository implements SolarRepository {
 }
 
 export class PostgresSolarRepository implements SolarRepository {
+  private propertiesUpdatedAtSupport: boolean | null = null;
+
   constructor(private readonly client: SqlClient) {}
 
   async upsertProperty(input: PropertyUpsertInput): Promise<Property> {
     const now = input.createdAt ?? new Date().toISOString();
+    const supportsUpdatedAt = await this.supportsPropertiesUpdatedAt();
+    const insertColumns = supportsUpdatedAt
+      ? `id, normalized_address, street, city, county, state, postal_code, latitude, longitude, parcel_id, municipality, created_at, updated_at`
+      : `id, normalized_address, street, city, county, state, postal_code, latitude, longitude, parcel_id, municipality, created_at`;
+    const insertValues = supportsUpdatedAt
+      ? `$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12, NOW()), COALESCE($13, NOW())`
+      : `$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12, NOW())`;
+    const updateClause = supportsUpdatedAt ? `,\n        updated_at = NOW()` : "";
+    const returningColumns = supportsUpdatedAt
+      ? `
+        id,
+        normalized_address AS "normalizedAddress",
+        street,
+        city,
+        county,
+        state,
+        postal_code AS "postalCode",
+        latitude,
+        longitude,
+        parcel_id AS "parcelId",
+        municipality,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      `
+      : `
+        id,
+        normalized_address AS "normalizedAddress",
+        street,
+        city,
+        county,
+        state,
+        postal_code AS "postalCode",
+        latitude,
+        longitude,
+        parcel_id AS "parcelId",
+        municipality,
+        created_at AS "createdAt"
+      `;
     const rows = await this.client.query<Property>(
       `
       INSERT INTO properties (
-        id, normalized_address, street, city, county, state, postal_code,
-        latitude, longitude, parcel_id, municipality, created_at, updated_at
+        ${insertColumns}
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12, NOW()), COALESCE($13, NOW())
+        ${insertValues}
       )
       ON CONFLICT (id) DO UPDATE SET
         normalized_address = EXCLUDED.normalized_address,
@@ -328,43 +367,46 @@ export class PostgresSolarRepository implements SolarRepository {
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
         parcel_id = EXCLUDED.parcel_id,
-        municipality = EXCLUDED.municipality,
-        updated_at = NOW()
+        municipality = EXCLUDED.municipality${updateClause}
       RETURNING
-        id,
-        normalized_address AS "normalizedAddress",
-        street,
-        city,
-        county,
-        state,
-        postal_code AS "postalCode",
-        latitude,
-        longitude,
-        parcel_id AS "parcelId",
-        municipality,
-        created_at AS "createdAt",
-        updated_at AS "updatedAt"
+        ${returningColumns}
       `,
-      [
-        input.id,
-        input.normalizedAddress,
-        input.street ?? null,
-        input.city ?? null,
-        input.county ?? null,
-        input.state ?? null,
-        input.postalCode ?? null,
-        input.latitude ?? null,
-        input.longitude ?? null,
-        input.parcelId ?? null,
-        input.municipality ?? null,
-        input.createdAt ?? null,
-        now,
-      ],
+      supportsUpdatedAt
+        ? [
+            input.id,
+            input.normalizedAddress,
+            input.street ?? null,
+            input.city ?? null,
+            input.county ?? null,
+            input.state ?? null,
+            input.postalCode ?? null,
+            input.latitude ?? null,
+            input.longitude ?? null,
+            input.parcelId ?? null,
+            input.municipality ?? null,
+            input.createdAt ?? null,
+            now,
+          ]
+        : [
+            input.id,
+            input.normalizedAddress,
+            input.street ?? null,
+            input.city ?? null,
+            input.county ?? null,
+            input.state ?? null,
+            input.postalCode ?? null,
+            input.latitude ?? null,
+            input.longitude ?? null,
+            input.parcelId ?? null,
+            input.municipality ?? null,
+            input.createdAt ?? null,
+          ],
     );
     return normalizePropertyRow(rows.rows[0]);
   }
 
   async getPropertyById(id: string): Promise<Property | null> {
+    const supportsUpdatedAt = await this.supportsPropertiesUpdatedAt();
     const rows = await this.client.query<Property>(
       `
       SELECT
@@ -380,7 +422,7 @@ export class PostgresSolarRepository implements SolarRepository {
         parcel_id AS "parcelId",
         municipality,
         created_at AS "createdAt",
-        updated_at AS "updatedAt"
+        ${supportsUpdatedAt ? `updated_at AS "updatedAt"` : `created_at AS "updatedAt"`}
       FROM properties
       WHERE id = $1
       LIMIT 1
@@ -391,6 +433,7 @@ export class PostgresSolarRepository implements SolarRepository {
   }
 
   async listProperties(): Promise<Property[]> {
+    const supportsUpdatedAt = await this.supportsPropertiesUpdatedAt();
     const rows = await this.client.query<Property>(
       `
       SELECT
@@ -406,9 +449,9 @@ export class PostgresSolarRepository implements SolarRepository {
         parcel_id AS "parcelId",
         municipality,
         created_at AS "createdAt",
-        updated_at AS "updatedAt"
+        ${supportsUpdatedAt ? `updated_at AS "updatedAt"` : `created_at AS "updatedAt"`}
       FROM properties
-      ORDER BY updated_at DESC, created_at DESC
+      ORDER BY ${supportsUpdatedAt ? `updated_at DESC, created_at DESC` : `created_at DESC`}
       `,
     );
     return rows.rows.map(normalizePropertyRow);
@@ -454,6 +497,25 @@ export class PostgresSolarRepository implements SolarRepository {
       ...rows.rows[0],
       confidence: coerceNumber(rows.rows[0].confidence) ?? 0,
     };
+  }
+
+  private async supportsPropertiesUpdatedAt(): Promise<boolean> {
+    if (this.propertiesUpdatedAtSupport != null) {
+      return this.propertiesUpdatedAtSupport;
+    }
+    const rows = await this.client.query<{ exists: boolean }>(
+      `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'properties'
+          AND column_name = 'updated_at'
+      ) AS exists
+      `,
+    );
+    this.propertiesUpdatedAtSupport = Boolean(rows.rows[0]?.exists);
+    return this.propertiesUpdatedAtSupport;
   }
 
   async listPropertyDiscoveries(propertyId: string): Promise<PropertyDiscoveryRecord[]> {

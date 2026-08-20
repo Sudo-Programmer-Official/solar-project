@@ -732,6 +732,18 @@ export interface DiscoveryScanLead extends TodayLeadCard {
   routeReason: string;
 }
 
+export const DiscoveryScanStage = {
+  GEOCODING: "GEOCODING",
+  PROPERTY_DISCOVERY: "PROPERTY_DISCOVERY",
+  PERSISTENCE: "PERSISTENCE",
+  PRE_RANKING: "PRE_RANKING",
+  SOLAR_ANALYSIS: "SOLAR_ANALYSIS",
+  FINAL_RANKING: "FINAL_RANKING",
+} as const;
+
+export type DiscoveryScanStage =
+  (typeof DiscoveryScanStage)[keyof typeof DiscoveryScanStage];
+
 export const DiscoveryScanStatus = {
   DISCOVERING: "DISCOVERING",
   PRE_RANKING: "PRE_RANKING",
@@ -747,11 +759,31 @@ export type DiscoveryScanStatus =
   (typeof DiscoveryScanStatus)[keyof typeof DiscoveryScanStatus];
 
 export interface DiscoveryScanStageProgress {
-  stage: DiscoveryScanStatus;
+  stage: DiscoveryScanStatus | DiscoveryScanStage;
   message: string;
   completed?: number | null;
   total?: number | null;
   updatedAt: string;
+}
+
+export const DiscoveryScanFailureCode = {
+  DATA_COVERAGE_UNAVAILABLE: "DATA_COVERAGE_UNAVAILABLE",
+  DATABASE_SCHEMA_MISMATCH: "DATABASE_SCHEMA_MISMATCH",
+  DATABASE_UNAVAILABLE: "DATABASE_UNAVAILABLE",
+  DATABASE_WRITE_FAILED: "DATABASE_WRITE_FAILED",
+  DISCOVERY_PROVIDER_FAILED: "DISCOVERY_PROVIDER_FAILED",
+  GEOCODING_REQUEST_FAILED: "GEOCODING_REQUEST_FAILED",
+  GOOGLE_SOLAR_REQUEST_FAILED: "GOOGLE_SOLAR_REQUEST_FAILED",
+  PERSISTENCE_FAILED: "PERSISTENCE_FAILED",
+  PROVIDER_TEMPORARY_FAILURE: "PROVIDER_TEMPORARY_FAILURE",
+} as const;
+
+export type DiscoveryScanFailureCode =
+  (typeof DiscoveryScanFailureCode)[keyof typeof DiscoveryScanFailureCode];
+
+export interface DiscoveryScanError {
+  code: DiscoveryScanFailureCode;
+  message: string;
 }
 
 export interface DiscoveryProviderAttemptDiagnostics {
@@ -824,12 +856,14 @@ export interface DiscoveryScanMetrics {
 
 export interface DiscoveryScanProgress extends DiscoveryScanResult {
   status: DiscoveryScanStatus;
+  stage?: DiscoveryScanStage | null;
   center: ScanCenter;
   filters: DiscoveryScanFilters;
   metrics: DiscoveryScanMetrics;
   stages: DiscoveryScanStageProgress[];
   message: string;
   coverageUnavailable: boolean;
+  error?: DiscoveryScanError | null;
   discoveryDiagnostics?: DiscoveryDiagnostics | null;
   updatedAt: string;
 }

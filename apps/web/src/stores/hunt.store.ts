@@ -77,7 +77,7 @@ export const useHuntStore = defineStore("hunt", () => {
     return route.stops.slice(currentIndex + 1).find((stop) => !completed.has(stop.propertyId)) ?? null;
   });
   const scanStatus = computed(() => scanProgress.value?.status ?? null);
-  const scanStage = computed(() => scanStatus.value);
+  const scanStage = computed(() => scanProgress.value?.stage ?? scanStatus.value);
   const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !["COMPLETE", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"].includes(scanStatus.value)));
   const isComplete = computed(() => scanStatus.value === "COMPLETE");
   const discoveredCount = computed(() => scanProgress.value?.propertiesFound ?? scanProgress.value?.metrics.rawDiscoveredCount ?? scanProgress.value?.metrics.discoveredCount ?? scanProgress.value?.metrics.discoveredProperties ?? 0);

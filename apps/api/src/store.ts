@@ -30,6 +30,8 @@ import type {
   CommandCenterTerritoryRanking,
   DiscoveryScanFilters,
   DiscoveryDiagnostics,
+  DiscoveryScanError,
+  DiscoveryScanFailureCode,
   DiscoveryScanLead,
   DiscoveryScanJobResponse,
   DiscoveryScanMetrics,
@@ -40,6 +42,7 @@ import type {
   DiscoveryScanStatusResponse,
   DiscoveryScanResultsPage,
   DiscoveryScanStageProgress,
+  DiscoveryScanStage,
   DiscoveryScanStatus,
   DiscoverResponse,
   DealBrief,
@@ -162,6 +165,26 @@ const defaultRepository = new InMemorySolarRepository();
 const discoveryScanStore = new Map<string, DiscoveryScanProgress>();
 const routeStore = new Map<string, RoutePlan>();
 
+interface DiscoveryScanFailureContext {
+  stage: DiscoveryScanStage;
+  code: DiscoveryScanFailureCode;
+  message: string;
+  provider?: string | null;
+  httpStatus?: number | null;
+  propertyId?: string | null;
+  address?: string | null;
+  sqlState?: string | null;
+  durationMs?: number | null;
+  cause?: unknown;
+}
+
+class DiscoveryScanFatalError extends Error {
+  constructor(public readonly context: DiscoveryScanFailureContext) {
+    super(context.message);
+    this.name = "DiscoveryScanFatalError";
+  }
+}
+
 function createDiscoveryDiagnostics(center: { latitude: number; longitude: number }, radiusMiles: number): DiscoveryDiagnostics {
   return {
     center,
@@ -172,6 +195,159 @@ function createDiscoveryDiagnostics(center: { latitude: number; longitude: numbe
     residentialCandidateCount: 0,
     prequalifiedCount: 0,
   };
+}
+
+function createDiscoveryFatalError(context: DiscoveryScanFailureContext): DiscoveryScanFatalError {
+  return new DiscoveryScanFatalError(context);
+}
+
+function isDiscoveryFatalError(error: unknown): error is DiscoveryScanFatalError {
+  return error instanceof DiscoveryScanFatalError;
+}
+
+function toSafeDiscoveryError(context: DiscoveryScanFailureContext): DiscoveryScanError {
+  return {
+    code: context.code,
+    message: context.message,
+  };
+}
+
+function normalizeString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function getErrorCode(error: unknown): string | null {
+  const record = asRecord(error);
+  return normalizeString(record?.code);
+}
+
+function isDatabaseConnectionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|connection|timeout/i.test(message);
+}
+
+function isDatabaseSchemaError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = getErrorCode(error);
+  return code === "42703" || /column .* does not exist/i.test(message) || /undefined_column/i.test(message);
+}
+
+function classifyDatabaseFailure(error: unknown, stage: DiscoveryScanStage, details: Partial<DiscoveryScanFailureContext> = {}): DiscoveryScanFailureContext {
+  const code = isDatabaseSchemaError(error)
+    ? "DATABASE_SCHEMA_MISMATCH"
+    : isDatabaseConnectionError(error)
+      ? "DATABASE_UNAVAILABLE"
+      : "PERSISTENCE_FAILED";
+  return {
+    stage,
+    code,
+    message: "We couldn't access lead data right now.",
+    sqlState: getErrorCode(error),
+    cause: error,
+    ...details,
+  };
+}
+
+function isRetryableProviderFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /429|rate limit|timeout|timed out|network|ENOTFOUND|ECONNRESET|ECONNREFUSED|HTTP 5\d\d/i.test(message);
+}
+
+function classifyDiscoveryProviderFailure(
+  error: unknown,
+  provider: string | null,
+): DiscoveryScanFailureContext {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalizedProvider = provider?.toLowerCase() ?? "";
+  const isGoogleGeocodingProvider = normalizedProvider.includes("google_geocoding");
+  const isOverpassProvider = normalizedProvider.includes("overpass");
+
+  if (isGoogleGeocodingProvider) {
+    return {
+      stage: "PROPERTY_DISCOVERY",
+      code: isRetryableProviderFailure(error) ? "PROVIDER_TEMPORARY_FAILURE" : "GEOCODING_REQUEST_FAILED",
+      message: isRetryableProviderFailure(error)
+        ? "One of our data providers is temporarily unavailable."
+        : "Residential data discovery could not reach the geocoding provider.",
+      provider,
+      cause: error,
+    };
+  }
+
+  if (isOverpassProvider) {
+    return {
+      stage: "PROPERTY_DISCOVERY",
+      code: isRetryableProviderFailure(error) ? "PROVIDER_TEMPORARY_FAILURE" : "DISCOVERY_PROVIDER_FAILED",
+      message: isRetryableProviderFailure(error)
+        ? "One of our data providers is temporarily unavailable."
+        : "Residential data discovery could not complete.",
+      provider,
+      cause: error,
+    };
+  }
+
+  return {
+    stage: "PROPERTY_DISCOVERY",
+    code: isRetryableProviderFailure(error) ? "PROVIDER_TEMPORARY_FAILURE" : "DISCOVERY_PROVIDER_FAILED",
+    message: isRetryableProviderFailure(error)
+      ? "One of our data providers is temporarily unavailable."
+      : "Residential data discovery could not complete.",
+    provider,
+    cause: error,
+  };
+}
+
+function classifySolarAnalysisFailure(error: unknown, propertyId: string | null, address: string | null): DiscoveryScanFailureContext {
+  const message = error instanceof Error ? error.message : String(error);
+  const solarProviderError = error instanceof SolarProviderError ? error : null;
+  const providerCode = solarProviderError?.code ?? null;
+  const retryable = providerCode === "RATE_LIMITED" || providerCode === "TIMEOUT" || providerCode === "NETWORK_ERROR" || providerCode === "HTTP_ERROR" || providerCode === "QUOTA_EXCEEDED";
+  return {
+    stage: "SOLAR_ANALYSIS",
+    code: retryable ? "PROVIDER_TEMPORARY_FAILURE" : "GOOGLE_SOLAR_REQUEST_FAILED",
+    message: retryable ? "One of our data providers is temporarily unavailable." : "Solar enrichment could not complete.",
+    provider: "google_solar",
+    httpStatus: solarProviderError?.status ?? null,
+    propertyId,
+    address,
+    cause: error,
+  };
+}
+
+function logDiscoveryScanFailure(scanId: string, context: DiscoveryScanFailureContext, startedAt: number): void {
+  console.error(
+    JSON.stringify({
+      event: "discovery_scan_failed",
+      scanId,
+      stage: context.stage,
+      errorCode: context.code,
+      provider: context.provider ?? null,
+      httpStatus: context.httpStatus ?? null,
+      propertyId: context.propertyId ?? null,
+      address: context.address ?? null,
+      sqlState: context.sqlState ?? null,
+      durationMs: context.durationMs ?? Date.now() - startedAt,
+    }),
+  );
+}
+
+function logDiscoveryScanWarning(scanId: string, context: DiscoveryScanFailureContext): void {
+  console.warn(
+    JSON.stringify({
+      event: "discovery_scan_warning",
+      scanId,
+      stage: context.stage,
+      errorCode: context.code,
+      provider: context.provider ?? null,
+      httpStatus: context.httpStatus ?? null,
+      propertyId: context.propertyId ?? null,
+      address: context.address ?? null,
+    }),
+  );
 }
 
 export async function analyzeProperty(
@@ -849,6 +1025,7 @@ function createDiscoveryScanJob(scanId: string, input: DiscoveryScanInput): Disc
   return {
     scanId,
     status: "DISCOVERING",
+    stage: "PROPERTY_DISCOVERY",
     currentLocation: "center" in input ? "Selected location" : "Current location",
     radiusMiles,
     candidateCount: 0,
@@ -914,6 +1091,7 @@ async function runDiscoveryScanJob(
   const limit = Math.max(1, Math.min(input.limit ?? 50, 250));
   const maxGoogleSolarCalls = Math.max(0, Math.min(input.maxGoogleSolarCalls ?? 25, 25));
   let geocoder: Geocoder | null = null;
+  let currentPhase: DiscoveryScanStage = "PROPERTY_DISCOVERY";
   try {
     geocoder = dependencies.geocoder ?? resolveGeocoderDependency(env, dependencies);
   } catch {
@@ -929,6 +1107,7 @@ async function runDiscoveryScanJob(
     const next: DiscoveryScanProgress = {
       ...current,
       ...patch,
+      stage: patch.stage ?? (stage ? mapDiscoveryPhase(stage.stage) : current.stage),
       metrics: {
         ...current.metrics,
         ...(patch.metrics ?? {}),
@@ -989,6 +1168,7 @@ async function runDiscoveryScanJob(
     let coverageUnavailable = false;
 
     if (additionalNeed > 0) {
+      currentPhase = "PRE_RANKING";
       const providerResult = await discoverExternalProperties({
         latitude: center.latitude,
         longitude: center.longitude,
@@ -998,9 +1178,14 @@ async function runDiscoveryScanJob(
       providerCalls = providerResult.providerCalls;
       discoveredProperties = providerResult.properties;
       coverageUnavailable = providerResult.coverageUnavailable;
+      if (providerResult.failure && knownCount === 0 && providerResult.properties.length === 0) {
+        throw createDiscoveryFatalError(providerResult.failure);
+      }
     }
 
+    currentPhase = "PERSISTENCE";
     const persistedNewProperties = await persistDiscoveredProperties(discoveredProperties, repository);
+    currentPhase = "PRE_RANKING";
     const mergedCandidates = await mergeDiscoveryCandidates(
       center,
       radiusMiles,
@@ -1013,6 +1198,7 @@ async function runDiscoveryScanJob(
     const solarEligibleCandidates = minimumSystemKw == null
       ? filteredCandidates
       : filteredCandidates.filter((candidate) => candidate.maxRoofSolarCapacityKw == null || candidate.maxRoofSolarCapacityKw >= minimumSystemKw);
+    currentPhase = "SOLAR_ANALYSIS";
     const rankedCandidates = solarEligibleCandidates
       .slice()
       .sort((left, right) => right.cheapScore - left.cheapScore || left.distanceMiles - right.distanceMiles)
@@ -1020,6 +1206,7 @@ async function runDiscoveryScanJob(
     diagnostics.prequalifiedCount = filteredCandidates.length;
     diagnostics.residentialCandidateCount = filteredCandidates.length;
 
+    currentPhase = "SOLAR_ANALYSIS";
     updateJob(
       {
         status: "SOLAR_ANALYSIS",
@@ -1085,7 +1272,13 @@ async function runDiscoveryScanJob(
           );
           nextLead = mapDiscoveryResult(analyzed, candidate, "ANALYZED");
           analyzedCount += 1;
-        } catch {
+        } catch (error) {
+          const warning = classifySolarAnalysisFailure(
+            error,
+            candidate.property.id,
+            candidate.property.normalizedAddress,
+          );
+          logDiscoveryScanWarning(scanId, warning);
           // Fall through to a cheap ANALYZING result when provider analysis fails or is unavailable.
         }
       }
@@ -1162,6 +1355,7 @@ async function runDiscoveryScanJob(
     }
 
     const allProvidersFailed = diagnostics.providersAttempted.length > 0 && diagnostics.providersAttempted.every((attempt) => attempt.error != null);
+    currentPhase = "FINAL_RANKING";
     const finalStatus: DiscoveryScanStatus =
       allProvidersFailed && results.length === 0 && knownCount === 0
         ? "DISCOVERY_FAILED"
@@ -1251,23 +1445,36 @@ async function runDiscoveryScanJob(
     discoveryScanStore.set(scanId, dedupedJob);
     return dedupedJob;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const failureContext = isDiscoveryFatalError(error)
+      ? error.context
+      : currentPhase === "SOLAR_ANALYSIS"
+        ? classifySolarAnalysisFailure(error, null, null)
+        : classifyDatabaseFailure(error, currentPhase, {
+            provider: "database",
+          });
+    const discoveryError = toSafeDiscoveryError(failureContext);
     const failedJob = updateJob(
       {
         status: "FAILED",
-        message,
+        message: failureContext.message,
+        stage: failureContext.stage,
+        error: discoveryError,
         metrics: {
           durationMs: Date.now() - startedAt,
         },
       },
       {
-        stage: "FAILED",
-        message,
+        stage: failureContext.stage,
+        message: failureContext.message,
         completed: 0,
         total: 0,
         updatedAt: new Date().toISOString(),
       },
     );
+    logDiscoveryScanFailure(scanId, {
+      ...failureContext,
+      durationMs: Date.now() - startedAt,
+    }, startedAt);
     discoveryScanStore.set(scanId, failedJob);
     return failedJob;
   }
@@ -1468,6 +1675,7 @@ async function discoverExternalProperties(
   properties: DiscoveredProperty[];
   coverageUnavailable: boolean;
   provider: string | null;
+  failure: DiscoveryScanFailureContext | null;
 }> {
   if (shouldUseDiscoveryFixtures()) {
     if (diagnostics) {
@@ -1478,6 +1686,7 @@ async function discoverExternalProperties(
       properties: [],
       coverageUnavailable: knownCount === 0,
       provider: null,
+      failure: null,
     };
   }
 
@@ -1500,6 +1709,7 @@ async function discoverExternalProperties(
       properties: [],
       coverageUnavailable: knownCount === 0,
       provider: null,
+      failure: null,
     };
   }
 
@@ -1511,6 +1721,8 @@ async function discoverExternalProperties(
   let residentialCandidateCount = 0;
   const acceptedKeys = new Set(existingKeys);
   const discovered: DiscoveredProperty[] = [];
+  let lastProviderError: unknown = null;
+  let lastProviderSource: string | null = null;
   for (const provider of eligibleProviders) {
     const attempt: DiscoveryProviderAttemptDiagnostics = {
       provider: provider.source,
@@ -1559,8 +1771,10 @@ async function discoverExternalProperties(
           acceptedProvider = provider.source;
         }
       }
-    } catch {
+    } catch (error) {
       attempt.error = "Provider discovery failed";
+      lastProviderError = error;
+      lastProviderSource = provider.source;
     }
     attempt.durationMs = Date.now() - startedAt;
     if (diagnostics) {
@@ -1576,6 +1790,10 @@ async function discoverExternalProperties(
   }
 
   const coverageUnavailable = knownCount === 0 && rawCandidateCount === 0;
+  const failure =
+    coverageUnavailable && lastProviderError
+      ? classifyDiscoveryProviderFailure(lastProviderError, lastProviderSource ?? acceptedProvider ?? eligibleProviders[0]?.source ?? null)
+      : null;
   if (diagnostics) {
     diagnostics.rawCandidateCount = rawCandidateCount;
     diagnostics.deduplicatedCandidateCount = deduplicatedCandidateCount;
@@ -1587,6 +1805,7 @@ async function discoverExternalProperties(
     properties: discovered,
     coverageUnavailable,
     provider: acceptedProvider ?? eligibleProviders[0]?.source ?? null,
+    failure,
   };
 }
 
@@ -1594,7 +1813,13 @@ async function persistDiscoveredProperties(
   discovered: DiscoveredProperty[],
   repository: SolarRepository,
 ): Promise<Property[]> {
-  const existingProperties = await repository.listProperties();
+  let existingProperties: Property[];
+  try {
+    existingProperties = await repository.listProperties();
+  } catch (error) {
+    throw createDiscoveryFatalError(classifyDatabaseFailure(error, "PERSISTENCE"));
+  }
+
   const persisted: Property[] = [];
   for (const candidate of discovered) {
     const metadata = isRecord(candidate.metadata) ? candidate.metadata : null;
@@ -1610,33 +1835,40 @@ async function persistDiscoveredProperties(
       longitude: candidate.longitude,
     });
     const propertyId = matchingProperty?.id ?? stableId(propertyDiscoveryKey(candidate));
-    const property = await repository.upsertProperty({
-      id: propertyId,
-      normalizedAddress,
-      street: candidate.address?.split(",")[0]?.trim() ?? matchingProperty?.street ?? null,
-      city: city ?? matchingProperty?.city ?? null,
-      county: county ?? matchingProperty?.county ?? null,
-      state: state ?? matchingProperty?.state ?? "PA",
-      postalCode: postalCode ?? matchingProperty?.postalCode ?? null,
-      latitude: candidate.latitude ?? matchingProperty?.latitude ?? null,
-      longitude: candidate.longitude ?? matchingProperty?.longitude ?? null,
-      parcelId: candidate.parcelId ?? matchingProperty?.parcelId ?? null,
-      municipality: extractMunicipalityFromAddress(candidate.address) ?? city ?? matchingProperty?.municipality ?? null,
-    });
-    if (!matchingProperty) {
-      existingProperties.push(property);
+    try {
+      const property = await repository.upsertProperty({
+        id: propertyId,
+        normalizedAddress,
+        street: candidate.address?.split(",")[0]?.trim() ?? matchingProperty?.street ?? null,
+        city: city ?? matchingProperty?.city ?? null,
+        county: county ?? matchingProperty?.county ?? null,
+        state: state ?? matchingProperty?.state ?? "PA",
+        postalCode: postalCode ?? matchingProperty?.postalCode ?? null,
+        latitude: candidate.latitude ?? matchingProperty?.latitude ?? null,
+        longitude: candidate.longitude ?? matchingProperty?.longitude ?? null,
+        parcelId: candidate.parcelId ?? matchingProperty?.parcelId ?? null,
+        municipality: extractMunicipalityFromAddress(candidate.address) ?? city ?? matchingProperty?.municipality ?? null,
+      });
+      if (!matchingProperty) {
+        existingProperties.push(property);
+      }
+      await repository.upsertPropertyDiscovery({
+        id: stableId(`${property.id}:${candidate.source}:${candidate.externalId ?? property.normalizedAddress}`),
+        propertyId: property.id,
+        provider: candidate.source,
+        sourceRecordId: candidate.externalId ?? null,
+        sourceUrl: null,
+        retrievedAt: new Date().toISOString(),
+        confidence: candidate.confidence,
+        discoveryJson: candidate,
+      });
+      persisted.push(property);
+    } catch (error) {
+      throw createDiscoveryFatalError(classifyDatabaseFailure(error, "PERSISTENCE", {
+        propertyId,
+        address: candidate.address ?? normalizedAddress,
+      }));
     }
-    await repository.upsertPropertyDiscovery({
-      id: stableId(`${property.id}:${candidate.source}:${candidate.externalId ?? property.normalizedAddress}`),
-      propertyId: property.id,
-      provider: candidate.source,
-      sourceRecordId: candidate.externalId ?? null,
-      sourceUrl: null,
-      retrievedAt: new Date().toISOString(),
-      confidence: candidate.confidence,
-      discoveryJson: candidate,
-    });
-    persisted.push(property);
   }
   return persisted;
 }
@@ -2319,71 +2551,78 @@ async function buildDiscoveryCandidateRecord(
   markets: NeighborhoodMarket[],
   repository: SolarRepository,
 ): Promise<DiscoveryCandidateRecord> {
-  const market = findMarketForProperty(property, markets);
-  const discoveryRecords = await repository.listPropertyDiscoveries(property.id);
-  const latestDiscovery = discoveryRecords[0] ?? null;
-  const leadOutcome = await repository.getLeadOutcomeByPropertyId(property.id);
-  const usageProfile = await repository.getUsageProfileByPropertyId(property.id);
-  const permits = await repository.listPermits(property.id);
-  const propertySignals = await repository.listPropertySignals(property.id);
-  const opportunityAssessment = await repository.getOpportunityAssessmentByPropertyId(property.id);
-  const solarAssessment = await repository.getSolarAssessmentByPropertyId(property.id);
-  const auditRecord = solarAssessment ? await repository.getSolarAssessmentAuditByAssessmentId(solarAssessment.id) : null;
-  const freshAnalysis =
-    solarAssessment && auditRecord && isCacheableAudit(auditRecord.auditJson)
-      ? await hydrateStoredAnalysis(property, repository)
-      : null;
-  const maxRoofSolarCapacityKw = freshAnalysis?.maxRoofSolarCapacityKw ?? solarAssessment?.estimatedMaxSystemKw ?? estimateCapacityFromSignals(propertySignals, market);
-  const confirmedAnnualUsageKwh = freshAnalysis?.confirmedAnnualUsageKwh ?? usageProfile?.annualUsageKwh ?? null;
-  const estimatedEnergyNeedKw = freshAnalysis?.estimatedEnergyNeedKw ?? estimateEnergyNeedKw(confirmedAnnualUsageKwh);
-  const signals = deriveDiscoverySignals(property, market, propertySignals, permits);
-  const propertyUse = inferPropertyUse(property, maxRoofSolarCapacityKw, freshAnalysis);
-  const cheapReasons = buildDiscoveryReasons({
-    property,
-    market,
-    discoverySource: latestDiscovery?.provider ?? null,
-    discoveryConfidence: latestDiscovery?.confidence ?? null,
-    permits,
-    signals,
-    opportunityAssessment,
-    freshAnalysis,
-    maxRoofSolarCapacityKw,
-    confirmedAnnualUsageKwh,
-  });
-  const cheapScore = buildDiscoveryScore({
-    market,
-    discoverySource: latestDiscovery?.provider ?? null,
-    discoveryConfidence: latestDiscovery?.confidence ?? null,
-    permits,
-    propertySignals,
-    opportunityAssessment,
-    freshAnalysis,
-    leadOutcome,
-    usageProfile,
-    maxRoofSolarCapacityKw,
-  });
+  try {
+    const market = findMarketForProperty(property, markets);
+    const discoveryRecords = await repository.listPropertyDiscoveries(property.id);
+    const latestDiscovery = discoveryRecords[0] ?? null;
+    const leadOutcome = await repository.getLeadOutcomeByPropertyId(property.id);
+    const usageProfile = await repository.getUsageProfileByPropertyId(property.id);
+    const permits = await repository.listPermits(property.id);
+    const propertySignals = await repository.listPropertySignals(property.id);
+    const opportunityAssessment = await repository.getOpportunityAssessmentByPropertyId(property.id);
+    const solarAssessment = await repository.getSolarAssessmentByPropertyId(property.id);
+    const auditRecord = solarAssessment ? await repository.getSolarAssessmentAuditByAssessmentId(solarAssessment.id) : null;
+    const freshAnalysis =
+      solarAssessment && auditRecord && isCacheableAudit(auditRecord.auditJson)
+        ? await hydrateStoredAnalysis(property, repository)
+        : null;
+    const maxRoofSolarCapacityKw = freshAnalysis?.maxRoofSolarCapacityKw ?? solarAssessment?.estimatedMaxSystemKw ?? estimateCapacityFromSignals(propertySignals, market);
+    const confirmedAnnualUsageKwh = freshAnalysis?.confirmedAnnualUsageKwh ?? usageProfile?.annualUsageKwh ?? null;
+    const estimatedEnergyNeedKw = freshAnalysis?.estimatedEnergyNeedKw ?? estimateEnergyNeedKw(confirmedAnnualUsageKwh);
+    const signals = deriveDiscoverySignals(property, market, propertySignals, permits);
+    const propertyUse = inferPropertyUse(property, maxRoofSolarCapacityKw, freshAnalysis);
+    const cheapReasons = buildDiscoveryReasons({
+      property,
+      market,
+      discoverySource: latestDiscovery?.provider ?? null,
+      discoveryConfidence: latestDiscovery?.confidence ?? null,
+      permits,
+      signals,
+      opportunityAssessment,
+      freshAnalysis,
+      maxRoofSolarCapacityKw,
+      confirmedAnnualUsageKwh,
+    });
+    const cheapScore = buildDiscoveryScore({
+      market,
+      discoverySource: latestDiscovery?.provider ?? null,
+      discoveryConfidence: latestDiscovery?.confidence ?? null,
+      permits,
+      propertySignals,
+      opportunityAssessment,
+      freshAnalysis,
+      leadOutcome,
+      usageProfile,
+      maxRoofSolarCapacityKw,
+    });
 
-  return {
-    property,
-    distanceMiles,
-    propertyUse,
-    market,
-    discoverySource: latestDiscovery?.provider ?? null,
-    discoveryConfidence: latestDiscovery?.confidence ?? null,
-    leadOutcome,
-    usageProfile,
-    permits,
-    propertySignals,
-    opportunityAssessment,
-    freshAnalysis,
-    maxRoofSolarCapacityKw,
-    confirmedAnnualUsageKwh,
-    estimatedEnergyNeedKw,
-    cheapScore,
-    cheapReasons,
-    signals,
-    routeReason: cheapReasons[0] ?? "Highest-value nearby opportunity",
-  };
+    return {
+      property,
+      distanceMiles,
+      propertyUse,
+      market,
+      discoverySource: latestDiscovery?.provider ?? null,
+      discoveryConfidence: latestDiscovery?.confidence ?? null,
+      leadOutcome,
+      usageProfile,
+      permits,
+      propertySignals,
+      opportunityAssessment,
+      freshAnalysis,
+      maxRoofSolarCapacityKw,
+      confirmedAnnualUsageKwh,
+      estimatedEnergyNeedKw,
+      cheapScore,
+      cheapReasons,
+      signals,
+      routeReason: cheapReasons[0] ?? "Highest-value nearby opportunity",
+    };
+  } catch (error) {
+    throw createDiscoveryFatalError(classifyDatabaseFailure(error, "PERSISTENCE", {
+      propertyId: property.id,
+      address: property.normalizedAddress,
+    }));
+  }
 }
 
 function applyDiscoveryFilters(
@@ -4635,4 +4874,65 @@ function clamp(value: number, min = 0, max = 100): number {
 
 function clampPercent(value: number): number {
   return clamp(Math.round(value * 100));
+}
+
+function mapDiscoveryPhase(status: DiscoveryScanStageProgress["stage"]): DiscoveryScanStage {
+  switch (status) {
+    case "GEOCODING":
+    case "PROPERTY_DISCOVERY":
+    case "PERSISTENCE":
+    case "PRE_RANKING":
+    case "SOLAR_ANALYSIS":
+    case "FINAL_RANKING":
+      return status;
+    case "DISCOVERING":
+      return "PROPERTY_DISCOVERY";
+    case "FINAL_RANKING":
+    case "COMPLETE":
+      return "FINAL_RANKING";
+    case "FAILED":
+    case "DISCOVERY_FAILED":
+    case "DATA_COVERAGE_UNAVAILABLE":
+      return "PROPERTY_DISCOVERY";
+    default:
+      return "PROPERTY_DISCOVERY";
+  }
+}
+
+function buildDiscoveryFailure(
+  message: string,
+  context: {
+    stage: DiscoveryScanStage;
+  },
+): DiscoveryScanError {
+  void context;
+  const normalized = message.toLowerCase();
+  if (/updated_at does not exist|column .*updated_at.*does not exist/.test(normalized)) {
+    return {
+      code: "DATABASE_SCHEMA_MISMATCH",
+      message: "We couldn't access lead data right now.",
+    };
+  }
+  if (/connection|timeout|relation .* does not exist|database/i.test(message)) {
+    return {
+      code: "DATABASE_UNAVAILABLE",
+      message: "We couldn't access lead data right now.",
+    };
+  }
+  if (/geocod/i.test(message)) {
+    return {
+      code: "GEOCODING_REQUEST_FAILED",
+      message: "We couldn't resolve that location.",
+    };
+  }
+  if (/provider|solar|imagery|quota|request denied|over query limit|invalid request/i.test(message)) {
+    return {
+      code: "PROVIDER_TEMPORARY_FAILURE",
+      message: "One of our data providers is temporarily unavailable.",
+    };
+  }
+  return {
+    code: "DISCOVERY_PROVIDER_FAILED",
+    message: "We couldn't finish this scan.",
+  };
 }
