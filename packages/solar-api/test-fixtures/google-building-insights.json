@@ -1,0 +1,66 @@
+{
+  "version": "v1",
+  "name": "projects/solar/buildings/abc123",
+  "imageryDate": "2024-05-11",
+  "imageryQuality": "HIGH",
+  "buildingId": "building-123",
+  "center": {
+    "latitude": 40.2041,
+    "longitude": -79.7625
+  },
+  "roofAreaMeters2": 182.4,
+  "groundAreaMeters2": 196.8,
+  "imageryProcessedDate": "2024-05-21",
+  "solarPotential": {
+    "maxArrayAreaMeters2": 120.2,
+    "maxArrayPanelsCount": 28,
+    "panelCapacityWatts": 410,
+    "maxSunshineHoursPerYear": 1452.8,
+    "solarPanelConfigs": [
+      {
+        "panelsCount": 28,
+        "yearlyEnergyDcKwh": 12980.5,
+        "orientation": "SOUTH",
+        "pitchDegrees": 24,
+        "azimuthDegrees": 180,
+        "panelHeightMeters": 1.9,
+        "panelWidthMeters": 1.0
+      }
+    ]
+  },
+  "wholeRoofStats": [
+    {
+      "areaMeters2": 182.4,
+      "sunshineHours": 1452.8
+    }
+  ],
+  "buildingStats": [
+    {
+      "roofSegmentStatsCount": 1
+    }
+  ],
+  "detectedArrays": {
+    "detectionStatus": "DETECTION_STATUS_ARRAYS_DETECTED",
+    "latestCaptureDate": "2024-05-18"
+  },
+  "roofSegmentStats": [
+    {
+      "areaMeters2": 78.1,
+      "pitchDegrees": 24,
+      "azimuthDegrees": 180,
+      "sunshineHours": 1452.8,
+      "panelsCount": 14,
+      "yearlyEnergyDcKwh": 6500.3
+    }
+  ],
+  "solarPanels": [
+    {
+      "center": {
+        "latitude": 40.123,
+        "longitude": -79.456
+      },
+      "orientation": "SOUTH",
+      "segmentIndex": 0
+    }
+  ]
+}

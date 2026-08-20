@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --app-bg: 247 249 252;
+    --app-panel: 255 255 255;
+    --app-panel-2: 241 245 249;
+    --app-border: 219 228 239;
+    --app-text: 18 32 51;
+    --app-muted: 100 116 139;
+  }
+
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-[#f7f9fc] text-slate-900 antialiased;
+    background:
+      radial-gradient(circle at top, rgba(34, 211, 238, 0.08), transparent 26%),
+      linear-gradient(180deg, rgb(var(--app-bg)) 0%, #eef4fb 100%);
+  }
+
+  ::selection {
+    background: rgba(34, 211, 238, 0.22);
+    color: #122033;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col pb-24;
+  }
+
+  .page-surface {
+    @apply rounded-3xl border border-slate-200 bg-white shadow-card backdrop-blur-sm;
+  }
+
+  .touch-target {
+    @apply min-h-touch min-w-touch;
+  }
+
+  .field-label {
+    @apply text-[11px] font-semibold tracking-[0.12em] text-slate-500;
+  }
+
+  .field-value {
+    @apply text-sm font-semibold text-slate-900;
+  }
+
+  .soft-divider {
+    @apply border-t border-slate-200;
+  }
+}
