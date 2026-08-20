@@ -2,13 +2,14 @@
   <section class="page-surface p-4" :class="panelClasses">
     <div class="flex items-start gap-3">
       <div class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border" :class="iconClasses">
-        <el-icon v-if="!error" class="animate-spin" :size="18">
+        <el-icon v-if="!error && isScanning" class="animate-spin" :size="18">
           <Loading />
         </el-icon>
-        <span v-else class="text-base font-semibold">!</span>
+        <span v-else-if="error" class="text-base font-semibold">!</span>
+        <span v-else class="text-base font-semibold">✓</span>
       </div>
       <div class="min-w-0 flex-1">
-        <p class="field-label">{{ error ? "Scan failed" : `Scanning ${locationLabel}` }}</p>
+        <p class="field-label">{{ error ? "Scan failed" : isScanning ? `Scanning ${locationLabel}` : stage === "PARTIAL" ? "Scan completed with warnings" : "Scan complete" }}</p>
         <h3 class="mt-2 text-lg font-semibold text-slate-900">{{ title }}</h3>
         <p class="mt-1 text-sm text-slate-500">{{ subtitle }}</p>
 
@@ -94,6 +95,8 @@ const stageLabel = computed(() => {
       return "Preparing your best leads…";
     case "COMPLETE":
       return "Scan complete";
+    case "PARTIAL":
+      return "Scan still processing";
     case "FAILED":
     case "DISCOVERY_FAILED":
       return "Scan failed";
@@ -107,6 +110,9 @@ const stageLabel = computed(() => {
 const subtitle = computed(() => {
   if (props.error) {
     return props.error;
+  }
+  if (props.stage === "PARTIAL") {
+    return "The scan finished with limited data. Review the available leads and try again if needed.";
   }
   if (props.stage === "DATA_COVERAGE_UNAVAILABLE") {
     return "Property data isn’t available for this area yet.";
@@ -158,6 +164,9 @@ const progressHint = computed(() => {
       return `${props.discoveredCount} properties were checked in this area.`;
     }
     return `${analysisLabel.value} completed.`;
+  }
+  if (props.stage === "PARTIAL") {
+    return "The scan finished with limited data.";
   }
   if (props.stage === "DATA_COVERAGE_UNAVAILABLE") {
     return "Try a different location or widen the radius.";

@@ -750,6 +750,7 @@ export const DiscoveryScanStatus = {
   SOLAR_ANALYSIS: "SOLAR_ANALYSIS",
   FINAL_RANKING: "FINAL_RANKING",
   COMPLETE: "COMPLETE",
+  PARTIAL: "PARTIAL",
   FAILED: "FAILED",
   DISCOVERY_FAILED: "DISCOVERY_FAILED",
   DATA_COVERAGE_UNAVAILABLE: "DATA_COVERAGE_UNAVAILABLE",
@@ -776,6 +777,8 @@ export const DiscoveryScanFailureCode = {
   GOOGLE_SOLAR_REQUEST_FAILED: "GOOGLE_SOLAR_REQUEST_FAILED",
   PERSISTENCE_FAILED: "PERSISTENCE_FAILED",
   PROVIDER_TEMPORARY_FAILURE: "PROVIDER_TEMPORARY_FAILURE",
+  PROVIDER_TIMEOUT: "PROVIDER_TIMEOUT",
+  PROPERTY_DISCOVERY_TIMEOUT: "PROPERTY_DISCOVERY_TIMEOUT",
 } as const;
 
 export type DiscoveryScanFailureCode =
@@ -852,6 +855,14 @@ export interface DiscoveryScanMetrics {
   providerCalls: number;
   providerCoverage: string | null;
   durationMs: number | null;
+  geocodingMs: number | null;
+  dbCandidateLoadMs: number | null;
+  externalDiscoveryMs: number | null;
+  metadataPreloadMs: number | null;
+  preRankingMs: number | null;
+  solarAnalysisMs: number | null;
+  finalRankingMs: number | null;
+  totalMs: number | null;
 }
 
 export interface DiscoveryScanProgress extends DiscoveryScanResult {
@@ -865,6 +876,10 @@ export interface DiscoveryScanProgress extends DiscoveryScanResult {
   coverageUnavailable: boolean;
   error?: DiscoveryScanError | null;
   discoveryDiagnostics?: DiscoveryDiagnostics | null;
+  startedAt: string;
+  stageStartedAt: string;
+  completedAt: string | null;
+  warnings: string[];
   updatedAt: string;
 }
 

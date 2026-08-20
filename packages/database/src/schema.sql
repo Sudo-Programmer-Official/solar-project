@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS solar_assessments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_solar_assessments_score ON solar_assessments (solar_fit_score);
+CREATE INDEX IF NOT EXISTS idx_solar_assessments_property_assessed_at ON solar_assessments (property_id, assessed_at DESC, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS solar_assessment_audits (
   solar_assessment_id UUID PRIMARY KEY REFERENCES solar_assessments(id) ON DELETE CASCADE,
@@ -100,6 +101,8 @@ CREATE TABLE IF NOT EXISTS property_signals (
   expires_at TIMESTAMPTZ
 );
 
+CREATE INDEX IF NOT EXISTS idx_property_signals_property_observed_at ON property_signals (property_id, observed_at DESC);
+
 CREATE TABLE IF NOT EXISTS usage_profiles (
   id UUID PRIMARY KEY,
   property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -111,6 +114,8 @@ CREATE TABLE IF NOT EXISTS usage_profiles (
   confidence NUMERIC NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_usage_profiles_property_created_at ON usage_profiles (property_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS permit_records (
   id UUID PRIMARY KEY,
@@ -131,6 +136,7 @@ CREATE TABLE IF NOT EXISTS permit_records (
 );
 
 CREATE INDEX IF NOT EXISTS idx_permit_records_type_status ON permit_records (permit_type, status);
+CREATE INDEX IF NOT EXISTS idx_permit_records_property_date ON permit_records (property_id, issued_date DESC, application_date DESC, retrieved_at DESC);
 
 CREATE TABLE IF NOT EXISTS market_areas (
   id TEXT PRIMARY KEY,
@@ -266,3 +272,4 @@ CREATE TABLE IF NOT EXISTS opportunity_assessments (
 
 CREATE INDEX IF NOT EXISTS idx_opportunity_assessments_score ON opportunity_assessments (overall_opportunity_score);
 CREATE INDEX IF NOT EXISTS idx_opportunity_assessments_whale_score ON opportunity_assessments (whale_score);
+CREATE INDEX IF NOT EXISTS idx_opportunity_assessments_property_created_at ON opportunity_assessments (property_id, created_at DESC);

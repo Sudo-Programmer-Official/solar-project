@@ -225,6 +225,10 @@ export class MockHuntBackend {
       discoveryDiagnostics: null,
       message: isComplete ? `Built ${record.scanResult.results.length} leads` : "Analyzing top solar opportunities",
       coverageUnavailable: false,
+      startedAt: new Date(record.readyAt - 3_000).toISOString(),
+      stageStartedAt: new Date(record.readyAt - (isComplete ? 500 : 3_000)).toISOString(),
+      completedAt: isComplete ? new Date().toISOString() : null,
+      warnings: [],
       updatedAt: new Date().toISOString(),
       stages: [],
       metrics: {
@@ -249,6 +253,14 @@ export class MockHuntBackend {
         providerCalls: 0,
         providerCoverage: "database",
         durationMs: null,
+        geocodingMs: null,
+        dbCandidateLoadMs: null,
+        externalDiscoveryMs: null,
+        metadataPreloadMs: null,
+        preRankingMs: null,
+        solarAnalysisMs: null,
+        finalRankingMs: null,
+        totalMs: null,
       },
     };
   }

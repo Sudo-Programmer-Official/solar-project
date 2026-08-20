@@ -27,10 +27,20 @@ export interface PropertyDiscoveryProvider {
   discover(input: PropertyDiscoveryInput): Promise<DiscoveredProperty[]>;
 }
 
+export class PropertyDiscoveryTimeoutError extends Error {
+  constructor(public readonly provider: string, public readonly timeoutMs: number) {
+    super(`${provider} discovery timed out after ${timeoutMs}ms`);
+    this.name = "PropertyDiscoveryTimeoutError";
+  }
+}
+
 export class OverpassPropertyDiscoveryProvider implements PropertyDiscoveryProvider {
   readonly source = "openstreetmap_overpass";
 
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  constructor(
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly timeoutMs = 10_000,
+  ) {}
 
   supportsArea(input: PropertyDiscoveryInput): boolean {
     return Number.isFinite(input.latitude) && Number.isFinite(input.longitude) && input.radiusMiles > 0;
@@ -42,14 +52,27 @@ export class OverpassPropertyDiscoveryProvider implements PropertyDiscoveryProvi
     }
 
     const radiusMeters = Math.max(1000, Math.min(50_000, Math.round(input.radiusMiles * 1609.344)));
-    const query = this.buildQuery(input.latitude, input.longitude, radiusMeters);
-    const response = await this.fetchImpl("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-      },
-      body: new URLSearchParams({ data: query }).toString(),
-    });
+    const query = this.buildQuery(input.latitude, input.longitude, radiusMeters, Math.max(1, Math.ceil(this.timeoutMs / 1000)));
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+        },
+        body: new URLSearchParams({ data: query }).toString(),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new PropertyDiscoveryTimeoutError(this.source, this.timeoutMs);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       throw new Error(`Overpass discovery returned HTTP ${response.status}`);
@@ -68,9 +91,9 @@ export class OverpassPropertyDiscoveryProvider implements PropertyDiscoveryProvi
     return discovered;
   }
 
-  private buildQuery(latitude: number, longitude: number, radiusMeters: number): string {
+  private buildQuery(latitude: number, longitude: number, radiusMeters: number, timeoutSeconds: number): string {
     return `
-      [out:json][timeout:25];
+      [out:json][timeout:${timeoutSeconds}];
       (
         node(around:${radiusMeters},${latitude},${longitude})["building"];
         way(around:${radiusMeters},${latitude},${longitude})["building"];

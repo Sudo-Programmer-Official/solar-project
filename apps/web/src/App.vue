@@ -65,6 +65,9 @@ function formatDiscoveryScanError(error: { code: string; message: string } | nul
       return "No residential data is available for this area yet.";
     case "PROVIDER_TEMPORARY_FAILURE":
       return "One of our data providers is temporarily unavailable.";
+    case "PROVIDER_TIMEOUT":
+    case "PROPERTY_DISCOVERY_TIMEOUT":
+      return "Property discovery took too long, so the available leads are shown.";
     case "DATABASE_UNAVAILABLE":
     case "DATABASE_SCHEMA_MISMATCH":
     case "DATABASE_WRITE_FAILED":

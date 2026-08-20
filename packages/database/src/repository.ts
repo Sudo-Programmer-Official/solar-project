@@ -17,6 +17,7 @@ export interface SolarRepository {
   listProperties(): Promise<Property[]>;
   upsertPropertyDiscovery(input: PropertyDiscoveryUpsertInput): Promise<PropertyDiscoveryRecord>;
   listPropertyDiscoveries(propertyId: string): Promise<PropertyDiscoveryRecord[]>;
+  getDiscoveryPropertyMetadata(propertyIds: string[]): Promise<Map<string, DiscoveryPropertyMetadata>>;
   upsertSolarAssessment(input: SolarAssessmentUpsertInput): Promise<SolarAssessment>;
   getSolarAssessmentByPropertyId(propertyId: string): Promise<SolarAssessment | null>;
   upsertSolarAssessmentAudit(input: SolarAssessmentAuditUpsertInput): Promise<SolarAssessmentAuditRecord>;
@@ -35,6 +36,16 @@ export interface SolarRepository {
   getOpportunityAssessmentByPropertyId(propertyId: string): Promise<OpportunityAssessment | null>;
   listPermits(propertyId: string): Promise<PermitRecord[]>;
   getPermitStats(municipality: string): Promise<PermitStatsResult>;
+}
+
+export interface DiscoveryPropertyMetadata {
+  latestDiscovery: PropertyDiscoveryRecord | null;
+  leadOutcome: LeadOutcome | null;
+  usageProfile: UsageProfile | null;
+  permits: PermitRecord[];
+  propertySignals: PropertySignal[];
+  opportunityAssessment: OpportunityAssessment | null;
+  solarAssessment: SolarAssessment | null;
 }
 
 export interface PropertyUpsertInput extends Omit<Property, "id" | "createdAt" | "updatedAt"> {
@@ -177,6 +188,23 @@ export class InMemorySolarRepository implements SolarRepository {
 
   async listPropertyDiscoveries(propertyId: string): Promise<PropertyDiscoveryRecord[]> {
     return this.propertyDiscoveries.get(propertyId) ?? [];
+  }
+
+  async getDiscoveryPropertyMetadata(propertyIds: string[]): Promise<Map<string, DiscoveryPropertyMetadata>> {
+    const metadata = new Map<string, DiscoveryPropertyMetadata>();
+    for (const propertyId of propertyIds) {
+      const discoveries = this.propertyDiscoveries.get(propertyId) ?? [];
+      metadata.set(propertyId, {
+        latestDiscovery: discoveries[0] ?? null,
+        leadOutcome: [...this.leadOutcomes.values()].find((item) => item.propertyId === propertyId) ?? null,
+        usageProfile: [...this.usageProfiles.values()].find((item) => item.propertyId === propertyId) ?? null,
+        permits: this.permitRecords.get(propertyId) ?? [],
+        propertySignals: this.propertySignals.get(propertyId) ?? [],
+        opportunityAssessment: [...this.opportunityAssessments.values()].find((item) => item.propertyId === propertyId) ?? null,
+        solarAssessment: this.solarAssessmentsByPropertyId.get(propertyId) ?? null,
+      });
+    }
+    return metadata;
   }
 
   async upsertSolarAssessment(input: SolarAssessmentUpsertInput): Promise<SolarAssessment> {
@@ -541,6 +569,207 @@ export class PostgresSolarRepository implements SolarRepository {
       ...row,
       confidence: coerceNumber(row.confidence) ?? 0,
     }));
+  }
+
+  async getDiscoveryPropertyMetadata(propertyIds: string[]): Promise<Map<string, DiscoveryPropertyMetadata>> {
+    const metadata = new Map<string, DiscoveryPropertyMetadata>();
+    for (const propertyId of propertyIds) {
+      metadata.set(propertyId, {
+        latestDiscovery: null,
+        leadOutcome: null,
+        usageProfile: null,
+        permits: [],
+        propertySignals: [],
+        opportunityAssessment: null,
+        solarAssessment: null,
+      });
+    }
+    if (propertyIds.length === 0) {
+      return metadata;
+    }
+
+    const [discoveries, outcomes, usageProfiles, permits, signals, opportunities, assessments] = await Promise.all([
+      this.client.query<PropertyDiscoveryRecord>(
+        `
+        SELECT DISTINCT ON (property_id)
+          id,
+          property_id AS "propertyId",
+          provider,
+          source_record_id AS "sourceRecordId",
+          source_url AS "sourceUrl",
+          retrieved_at AS "retrievedAt",
+          confidence,
+          discovery_json AS "discoveryJson",
+          created_at AS "createdAt"
+        FROM property_discoveries
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, retrieved_at DESC, created_at DESC
+        `,
+        [propertyIds],
+      ),
+      this.client.query<LeadOutcome>(
+        `
+        SELECT DISTINCT ON (property_id)
+          id,
+          property_id AS "propertyId",
+          rep_id AS "repId",
+          outcome,
+          notes,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM lead_outcomes
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, updated_at DESC, created_at DESC
+        `,
+        [propertyIds],
+      ),
+      this.client.query<UsageProfile>(
+        `
+        SELECT DISTINCT ON (property_id)
+          id,
+          property_id AS "propertyId",
+          source,
+          annual_usage_kwh AS "annualUsageKwh",
+          monthly_average_kwh AS "monthlyAverageKwh",
+          peak_month_kwh AS "peakMonthKwh",
+          monthly_bill_average AS "monthlyBillAverage",
+          confidence,
+          created_at AS "createdAt"
+        FROM usage_profiles
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, created_at DESC
+        `,
+        [propertyIds],
+      ),
+      this.client.query<PermitRecord>(
+        `
+        SELECT
+          id,
+          property_id AS "propertyId",
+          municipality,
+          county,
+          state,
+          permit_number AS "permitNumber",
+          permit_type AS "permitType",
+          status,
+          application_date AS "applicationDate",
+          issued_date AS "issuedDate",
+          contractor_name AS "contractorName",
+          source_provider AS "sourceProvider",
+          source_url AS "sourceUrl",
+          confidence,
+          retrieved_at AS "retrievedAt"
+        FROM permit_records
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, COALESCE(issued_date, application_date, retrieved_at) DESC
+        `,
+        [propertyIds],
+      ),
+      this.client.query<PropertySignal>(
+        `
+        SELECT
+          id,
+          property_id AS "propertyId",
+          signal_type AS "signalType",
+          source,
+          value_json AS "valueJson",
+          confidence,
+          observed_at AS "observedAt",
+          expires_at AS "expiresAt"
+        FROM property_signals
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, observed_at DESC
+        `,
+        [propertyIds],
+      ),
+      this.client.query<OpportunityAssessment>(
+        `
+        SELECT DISTINCT ON (property_id)
+          id,
+          property_id AS "propertyId",
+          solar_fit_score AS "solarFitScore",
+          usage_opportunity_score AS "usageOpportunityScore",
+          system_size_score AS "systemSizeScore",
+          permit_signal_score AS "permitSignalScore",
+          field_priority_score AS "fieldPriorityScore",
+          whale_score AS "whaleScore",
+          overall_opportunity_score AS "overallOpportunityScore",
+          confidence,
+          score_version AS "scoreVersion",
+          explanation_json AS "explanationJson",
+          created_at AS "createdAt"
+        FROM opportunity_assessments
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, created_at DESC
+        `,
+        [propertyIds],
+      ),
+      this.client.query<SolarAssessment>(
+        `
+        SELECT DISTINCT ON (property_id)
+          id,
+          property_id AS "propertyId",
+          provider,
+          provider_building_id AS "providerBuildingId",
+          imagery_date AS "imageryDate",
+          imagery_processed_date AS "imageryProcessedDate",
+          imagery_quality AS "imageryQuality",
+          roof_area_meters2 AS "roofAreaMeters2",
+          ground_area_meters2 AS "groundAreaMeters2",
+          max_array_area_meters2 AS "maxArrayAreaMeters2",
+          max_array_panels_count AS "maxArrayPanelsCount",
+          panel_capacity_watts AS "panelCapacityWatts",
+          max_sunshine_hours_per_year AS "maxSunshineHoursPerYear",
+          estimated_max_system_kw AS "estimatedMaxSystemKw",
+          estimated_annual_production_kwh AS "estimatedAnnualProductionKwh",
+          existing_solar_status AS "existingSolarStatus",
+          existing_solar_confidence AS "existingSolarConfidence",
+          roof_complexity_score AS "roofComplexityScore",
+          shade_score AS "shadeScore",
+          orientation_score AS "orientationScore",
+          solar_fit_score AS "solarFitScore",
+          solar_fit_confidence AS "solarFitConfidence",
+          assessment_version AS "assessmentVersion",
+          provider_payload_reference AS "providerPayloadReference",
+          assessed_at AS "assessedAt",
+          created_at AS "createdAt"
+        FROM solar_assessments
+        WHERE property_id = ANY($1::uuid[])
+        ORDER BY property_id, assessed_at DESC, created_at DESC
+        `,
+        [propertyIds],
+      ),
+    ]);
+
+    for (const row of discoveries.rows) {
+      const item = metadata.get(row.propertyId);
+      if (item) item.latestDiscovery = { ...row, confidence: coerceNumber(row.confidence) ?? 0 };
+    }
+    for (const row of outcomes.rows) {
+      const item = metadata.get(row.propertyId);
+      if (item) item.leadOutcome = normalizeLeadOutcomeRow(row);
+    }
+    for (const row of usageProfiles.rows) {
+      const item = metadata.get(row.propertyId);
+      if (item) item.usageProfile = normalizeUsageProfileRow(row);
+    }
+    for (const row of permits.rows) {
+      const item = metadata.get(row.propertyId ?? "");
+      if (item) item.permits.push({ ...row, confidence: coerceNumber(row.confidence) ?? 0 });
+    }
+    for (const row of signals.rows) {
+      const item = metadata.get(row.propertyId);
+      if (item) item.propertySignals.push({ ...row, confidence: coerceNumber(row.confidence) ?? 0 });
+    }
+    for (const row of opportunities.rows) {
+      const item = metadata.get(row.propertyId);
+      if (item) item.opportunityAssessment = normalizeOpportunityAssessmentRow(row);
+    }
+    for (const row of assessments.rows) {
+      const item = metadata.get(row.propertyId);
+      if (item) item.solarAssessment = normalizeSolarAssessmentRow(row);
+    }
+    return metadata;
   }
 
   async upsertSolarAssessment(input: SolarAssessmentUpsertInput): Promise<SolarAssessment> {

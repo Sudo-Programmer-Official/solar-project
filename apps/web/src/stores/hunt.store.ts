@@ -78,7 +78,7 @@ export const useHuntStore = defineStore("hunt", () => {
   });
   const scanStatus = computed(() => scanProgress.value?.status ?? null);
   const scanStage = computed(() => scanProgress.value?.stage ?? scanStatus.value);
-  const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !["COMPLETE", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"].includes(scanStatus.value)));
+  const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !["COMPLETE", "PARTIAL", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"].includes(scanStatus.value)));
   const isComplete = computed(() => scanStatus.value === "COMPLETE");
   const discoveredCount = computed(() => scanProgress.value?.propertiesFound ?? scanProgress.value?.metrics.rawDiscoveredCount ?? scanProgress.value?.metrics.discoveredCount ?? scanProgress.value?.metrics.discoveredProperties ?? 0);
   const strongLeadCount = computed(() => scanProgress.value?.metrics.qualifiedLeadCount ?? scanProgress.value?.qualifiedLeadCount ?? scanResults.value.length ?? 0);
@@ -188,10 +188,11 @@ export const useHuntStore = defineStore("hunt", () => {
       scanResultsCursor.value = null;
       scanResultsHasMore.value = false;
       scanResultsTotal.value = 0;
-      const terminalStatuses = new Set(["COMPLETE", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"]);
-      const deadline = Date.now() + 45_000;
-      while (scanProgress.value && !terminalStatuses.has(scanProgress.value.status) && Date.now() < deadline) {
-        await sleep(900);
+      const terminalStatuses = new Set(["COMPLETE", "PARTIAL", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"]);
+      const fastPollDeadline = Date.now() + 45_000;
+      const hardPollDeadline = Date.now() + 120_000;
+      while (scanProgress.value && !terminalStatuses.has(scanProgress.value.status) && Date.now() < hardPollDeadline) {
+        await sleep(Date.now() < fastPollDeadline ? 900 : 5_000);
         if (!isCurrentScanSession(sessionId)) {
           return emptyScanResult(committedRadius, center);
         }
@@ -206,6 +207,17 @@ export const useHuntStore = defineStore("hunt", () => {
         if (scanProgress.value && (scanProgress.value.metrics.qualifiedLeadCount ?? scanProgress.value.metrics.resultsFound) > 0 && scanResults.value.length === 0) {
           await loadScanResultsPage({ reset: true, scanId: job.scanId, sessionId });
         }
+      }
+      if (scanProgress.value && !terminalStatuses.has(scanProgress.value.status) && Date.now() >= hardPollDeadline) {
+        const timedOutProgress: DiscoveryScanStatusResponse = {
+          ...scanProgress.value,
+          status: "PARTIAL",
+          message: "This scan is taking longer than expected.",
+          warnings: [...(scanProgress.value.warnings ?? []), "CLIENT_POLL_TIMEOUT"],
+        };
+        scanProgress.value = timedOutProgress;
+        scan.value = timedOutProgress;
+        error.value = "This scan is taking longer than expected.";
       }
       if (!isCurrentScanSession(sessionId)) {
         return emptyScanResult(committedRadius, center);

@@ -279,7 +279,7 @@ export async function getDiscoveryScanResults(scanId: string, cursor?: string | 
 }
 
 async function waitForDiscoveryScan(scanId: string): Promise<DiscoveryScanResult | null> {
-  const terminalStatuses: DiscoveryScanStatus[] = ["COMPLETE", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"];
+  const terminalStatuses: DiscoveryScanStatus[] = ["COMPLETE", "PARTIAL", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"];
   const deadline = Date.now() + 45_000;
   let current = await getDiscoveryScan(scanId);
   while (current && !terminalStatuses.includes(current.status) && Date.now() < deadline) {
