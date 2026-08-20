@@ -7,6 +7,7 @@ const router = createRouter({
     { path: "/today", name: "today", component: () => import("../pages/Today.vue") },
     { path: "/discover", redirect: "/hunt" },
     { path: "/hunt", name: "hunt", component: () => import("../pages/Hunt.vue") },
+    { path: "/market", name: "market", component: () => import("../pages/Market.vue") },
     { path: "/route", name: "route", component: () => import("../pages/Route.vue") },
     { path: "/map", name: "map", component: () => import("../pages/Map.vue") },
     { path: "/leads", name: "leads", component: () => import("../pages/Leads.vue") },

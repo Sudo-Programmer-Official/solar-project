@@ -709,6 +709,7 @@ export function getDiscoveryScanResultsPage(
     nextCursor: nextIndex < sourceResults.length ? encodeDiscoveryCursor(nextIndex) : null,
     hasMore: nextIndex < sourceResults.length,
     totalAvailable: sourceResults.length,
+    qualifiedLeadCount: sourceResults.length,
   };
 }
 
@@ -748,19 +749,27 @@ function createDiscoveryScanJob(scanId: string, input: DiscoveryScanInput): Disc
     analyzedCount: 0,
     googleSolarCalls: 0,
     estimatedCostUsd: 0,
+    propertiesFound: 0,
+    qualifiedLeadCount: 0,
+    solarAnalyzedCount: 0,
     results: [],
     center,
     filters,
     discoveryDiagnostics: createDiscoveryDiagnostics(center, radiusMiles),
     metrics: {
+      rawDiscoveredCount: 0,
+      residentialCandidateCount: 0,
+      prequalifiedCount: 0,
+      solarEligibleCount: 0,
+      solarAnalyzedCount: 0,
+      qualifiedLeadCount: 0,
+      renderedLeadCount: 0,
       discoveredProperties: 0,
       discoveredCount: 0,
       knownProperties: 0,
-      prequalifiedCount: 0,
       newProperties: 0,
       prequalifiedCandidates: 0,
       solarCalls: 0,
-      solarAnalyzedCount: 0,
       solarCallBudget: Math.max(0, Math.min(input.maxGoogleSolarCalls ?? 25, 25)),
       largeOpportunities: 0,
       whaleCandidates: 0,
@@ -893,12 +902,17 @@ async function runDiscoveryScanJob(
       knownCandidates,
       persistedNewProperties,
     );
+    const minimumSystemKw = getMinimumSystemKw(input.filters ?? {});
     const filteredCandidates = applyDiscoveryFilters(mergedCandidates, input.filters ?? {});
-    const rankedCandidates = filteredCandidates
+    const solarEligibleCandidates = minimumSystemKw == null
+      ? filteredCandidates
+      : filteredCandidates.filter((candidate) => candidate.maxRoofSolarCapacityKw == null || candidate.maxRoofSolarCapacityKw >= minimumSystemKw);
+    const rankedCandidates = solarEligibleCandidates
       .slice()
       .sort((left, right) => right.cheapScore - left.cheapScore || left.distanceMiles - right.distanceMiles)
       .slice(0, limit);
-    diagnostics.prequalifiedCount = rankedCandidates.length;
+    diagnostics.prequalifiedCount = filteredCandidates.length;
+    diagnostics.residentialCandidateCount = filteredCandidates.length;
 
     updateJob(
       {
@@ -907,6 +921,13 @@ async function runDiscoveryScanJob(
         message: "Analyzing top solar opportunities",
         discoveryDiagnostics: diagnostics,
         metrics: {
+          rawDiscoveredCount: diagnostics.rawCandidateCount,
+          residentialCandidateCount: filteredCandidates.length,
+          prequalifiedCount: filteredCandidates.length,
+          solarEligibleCount: rankedCandidates.length,
+          solarAnalyzedCount: 0,
+          qualifiedLeadCount: 0,
+          renderedLeadCount: 0,
           knownProperties: knownCount,
           discoveredProperties: discoveredProperties.length,
           discoveredCount: discoveredProperties.length,
@@ -939,6 +960,7 @@ async function runDiscoveryScanJob(
 
       const hasFreshAssessment = candidate.freshAnalysis != null;
       const shouldAnalyzeNow = !hasFreshAssessment && googleSolarCalls < maxGoogleSolarCalls;
+      let nextLead: DiscoveryScanLead | null = null;
       if (shouldAnalyzeNow) {
         googleSolarCalls += 1;
         try {
@@ -955,8 +977,23 @@ async function runDiscoveryScanJob(
             repository,
             dependencies,
           );
-          appendDiscoveryLead(results, mapDiscoveryResult(analyzed, candidate, "ANALYZED"));
+          nextLead = mapDiscoveryResult(analyzed, candidate, "ANALYZED");
           analyzedCount += 1;
+        } catch {
+          // Fall through to a cheap ANALYZING result when provider analysis fails or is unavailable.
+        }
+      }
+
+      if (!nextLead && hasFreshAssessment) {
+        nextLead = mapDiscoveryResult(candidate.freshAnalysis!, candidate, "CACHED");
+        analyzedCount += 1;
+      } else if (!nextLead) {
+        nextLead = buildPendingDiscoveryResult(candidate, nextAction);
+      }
+
+      if (minimumSystemKw != null) {
+        const leadCapacity = nextLead?.maxRoofSolarCapacityKw ?? nextLead?.maxSystemKw ?? null;
+        if (leadCapacity == null || leadCapacity < minimumSystemKw) {
           updateJob(
             {
               results,
@@ -966,6 +1003,8 @@ async function runDiscoveryScanJob(
                 solarAnalyzedCount: analyzedCount,
                 solarCallBudget: maxGoogleSolarCalls,
                 resultsFound: results.length,
+                qualifiedLeadCount: results.length,
+                renderedLeadCount: results.length,
                 solarCalls: googleSolarCalls,
                 estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
                 largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
@@ -982,16 +1021,11 @@ async function runDiscoveryScanJob(
             },
           );
           continue;
-        } catch {
-          // Fall through to a cheap ANALYZING result when provider analysis fails or is unavailable.
         }
       }
 
-      if (hasFreshAssessment) {
-        appendDiscoveryLead(results, mapDiscoveryResult(candidate.freshAnalysis!, candidate, "CACHED"));
-        analyzedCount += 1;
-      } else {
-        appendDiscoveryLead(results, buildPendingDiscoveryResult(candidate, nextAction));
+      if (nextLead) {
+        appendDiscoveryLead(results, nextLead);
       }
       updateJob(
         {
@@ -1003,6 +1037,8 @@ async function runDiscoveryScanJob(
             solarAnalyzedCount: analyzedCount,
             solarCallBudget: maxGoogleSolarCalls,
             resultsFound: results.length,
+            qualifiedLeadCount: results.length,
+            renderedLeadCount: results.length,
             solarCalls: googleSolarCalls,
             estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
             largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
@@ -1026,15 +1062,19 @@ async function runDiscoveryScanJob(
         : coverageUnavailable && results.length === 0
           ? "DATA_COVERAGE_UNAVAILABLE"
           : "COMPLETE";
+    const uniqueResults = dedupeDiscoveryLeads(results);
     const finalMessage =
       finalStatus === "DISCOVERY_FAILED"
         ? "We could not complete this scan."
         : coverageUnavailable && results.length === 0
           ? "Property coverage is limited in this area."
+          : minimumSystemKw != null && uniqueResults.length === 0
+            ? rankedCandidates.length === 0
+              ? `No candidates met the ${minimumSystemKw}+ kW pre-filter.`
+              : `No leads matched the ${minimumSystemKw}+ kW filter.`
           : results.length > 0
             ? `Built ${results.length} leads`
             : "No discovered properties found";
-    const uniqueResults = dedupeDiscoveryLeads(results);
     const finalJob = updateJob(
       {
         status: finalStatus,
@@ -1045,15 +1085,23 @@ async function runDiscoveryScanJob(
         message: uniqueResults.length > 0 ? `Built ${uniqueResults.length} leads` : finalMessage,
         coverageUnavailable: finalStatus === "DATA_COVERAGE_UNAVAILABLE",
         discoveryDiagnostics: diagnostics,
+        propertiesFound: filteredCandidates.length,
+        qualifiedLeadCount: uniqueResults.length,
+        solarAnalyzedCount: analyzedCount,
         metrics: {
-          discoveredProperties: knownCandidates.length + discoveredProperties.length,
-          discoveredCount: knownCandidates.length + discoveredProperties.length,
-          knownProperties: knownCandidates.length,
-          prequalifiedCount: rankedCandidates.length,
-          newProperties: persistedNewProperties.length,
-          prequalifiedCandidates: rankedCandidates.length,
-          solarCalls: googleSolarCalls,
+          rawDiscoveredCount: diagnostics.rawCandidateCount,
+          residentialCandidateCount: filteredCandidates.length,
+          prequalifiedCount: filteredCandidates.length,
+          solarEligibleCount: rankedCandidates.length,
           solarAnalyzedCount: analyzedCount,
+          qualifiedLeadCount: uniqueResults.length,
+          renderedLeadCount: uniqueResults.length,
+          discoveredProperties: knownCandidates.length + discoveredProperties.length,
+          discoveredCount: diagnostics.rawCandidateCount,
+          knownProperties: knownCandidates.length,
+          newProperties: persistedNewProperties.length,
+          prequalifiedCandidates: filteredCandidates.length,
+          solarCalls: googleSolarCalls,
           solarCallBudget: maxGoogleSolarCalls,
           largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
           whaleCandidates: results.filter((lead) => lead.whaleScore >= 60).length,
@@ -1080,13 +1128,18 @@ async function runDiscoveryScanJob(
     const dedupedJob = {
       ...finalJob,
       results: uniqueResults,
-      analyzedCount: Math.min(analyzedCount, uniqueResults.length),
+      analyzedCount,
       candidateCount: filteredCandidates.length,
+      propertiesFound: filteredCandidates.length,
+      qualifiedLeadCount: uniqueResults.length,
+      solarAnalyzedCount: analyzedCount,
       message: uniqueResults.length > 0 ? `Built ${uniqueResults.length} leads` : finalMessage,
       metrics: {
         ...finalJob.metrics,
         resultsFound: uniqueResults.length,
-        solarAnalyzedCount: Math.min(analyzedCount, uniqueResults.length),
+        qualifiedLeadCount: uniqueResults.length,
+        renderedLeadCount: uniqueResults.length,
+        solarAnalyzedCount: analyzedCount,
       },
     };
     discoveryScanStore.set(scanId, dedupedJob);
@@ -2214,7 +2267,6 @@ function applyDiscoveryFilters(
   candidates: DiscoveryCandidateRecord[],
   filters: DiscoveryScanFilters,
 ): DiscoveryCandidateRecord[] {
-  const minimumSystemKw = filters.minimumSystemKw ?? filters.minCapacityKw ?? null;
   const whaleCandidates = filters.whaleCandidates ?? false;
   const highPriority = filters.highPriority ?? false;
   const recentRoofPermit = filters.recentRoofPermit ?? filters.recentRoofPermits ?? false;
@@ -2224,9 +2276,6 @@ function applyDiscoveryFilters(
   const revisit = filters.revisit ?? filters.revisits ?? false;
   return candidates.filter((candidate) => {
     if (!isResidentialPropertyUse(candidate.propertyUse)) {
-      return false;
-    }
-    if (minimumSystemKw != null && (candidate.maxRoofSolarCapacityKw ?? 0) < minimumSystemKw) {
       return false;
     }
     if ((whaleCandidates || highPriority) && candidate.cheapScore < 65) {
@@ -2252,6 +2301,10 @@ function applyDiscoveryFilters(
     }
     return true;
   });
+}
+
+function getMinimumSystemKw(filters: DiscoveryScanFilters): number | null {
+  return filters.minimumSystemKw ?? filters.minCapacityKw ?? null;
 }
 
 function mapDiscoveryResult(

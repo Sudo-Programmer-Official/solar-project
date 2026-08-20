@@ -142,7 +142,8 @@ function matchesGlobalFilters(
   if (filters.highValueArea && !lead.signals.some((signal) => signal.toLowerCase().includes("value area"))) {
     return false;
   }
-  if (filters.minimumSystemKw != null && (lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw ?? 0) < filters.minimumSystemKw) {
+  const capacity = lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw ?? null;
+  if (filters.minimumSystemKw != null && capacity != null && capacity < filters.minimumSystemKw) {
     return false;
   }
   return true;

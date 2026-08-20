@@ -19,6 +19,11 @@ import {
   resolveReverseLocationQuery,
   updateLeadOutcome,
 } from "./store";
+import {
+  getMarketArea,
+  getMarketEvents,
+  getMarketHotspots,
+} from "./market";
 import { createApiBootstrapContext } from "./bootstrap";
 import {
   buildImageryApiConfig,
@@ -155,6 +160,54 @@ export function createServer(repository?: SolarRepository, options: CreateServer
       if (req.method === "GET" && url.pathname === "/api/v1/neighborhoods/discover") {
         const radiusMiles = Number(url.searchParams.get("radiusMiles") ?? url.searchParams.get("radius") ?? "10");
         sendJson(res, 200, await getDiscoverResponse(Number.isFinite(radiusMiles) ? radiusMiles : 10, repository), corsHeaders);
+        return;
+      }
+
+      if (req.method === "GET" && url.pathname === "/api/v1/markets/hotspots") {
+        const latitude = Number(url.searchParams.get("latitude"));
+        const longitude = Number(url.searchParams.get("longitude"));
+        const radiusMiles = Number(url.searchParams.get("radiusMiles") ?? "10");
+        const days = Number(url.searchParams.get("days") ?? "90");
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          sendJson(res, 400, { error: "latitude and longitude are required" }, corsHeaders);
+          return;
+        }
+        sendJson(
+          res,
+          200,
+          await getMarketHotspots({
+            latitude,
+            longitude,
+            radiusMiles: Number.isFinite(radiusMiles) ? radiusMiles : 10,
+            days: Number.isFinite(days) ? days : 90,
+          }),
+          corsHeaders,
+        );
+        return;
+      }
+
+      if (req.method === "GET" && /\/api\/v1\/markets\/[^/]+$/.test(url.pathname)) {
+        const marketId = url.pathname.split("/")[4];
+        const area = await getMarketArea(marketId);
+        if (!area) {
+          sendJson(res, 404, { error: "Market area not found" }, corsHeaders);
+          return;
+        }
+        sendJson(res, 200, area, corsHeaders);
+        return;
+      }
+
+      if (req.method === "GET" && /\/api\/v1\/markets\/[^/]+\/events$/.test(url.pathname)) {
+        const marketId = url.pathname.split("/")[4];
+        const cursor = typeof url.searchParams.get("cursor") === "string" ? url.searchParams.get("cursor") : null;
+        const limitRaw = Number(url.searchParams.get("limit") ?? "20");
+        const limit = Number.isFinite(limitRaw) ? limitRaw : 20;
+        const page = await getMarketEvents(marketId, cursor, limit);
+        if (!page) {
+          sendJson(res, 404, { error: "Market area not found" }, corsHeaders);
+          return;
+        }
+        sendJson(res, 200, page, corsHeaders);
         return;
       }
 

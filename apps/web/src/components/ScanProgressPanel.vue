@@ -27,7 +27,7 @@
           <div class="rounded-2xl border border-slate-200 bg-white p-3">
             <div class="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <span>Solar analysis</span>
-              <span v-if="hasSolarProgress">{{ solarAnalyzedCount }} / {{ solarAnalysisTarget }}</span>
+              <span v-if="shouldShowAnalysisLabel">{{ analysisLabel }}</span>
             </div>
             <div v-if="hasSolarProgress" class="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
               <div class="h-full rounded-full bg-primary-400 transition-[width]" :style="{ width: progressWidth }" />
@@ -56,6 +56,7 @@ import { computed } from "vue";
 import type { DiscoveryScanStatus } from "@solar/contracts";
 import { ElIcon } from "element-plus";
 import { Loading } from "@element-plus/icons-vue";
+import { formatSolarAnalysisProgress } from "../utils/scanProgress";
 
 const emit = defineEmits<{
   retry: [];
@@ -139,6 +140,10 @@ const countLabel = computed(() => {
 });
 
 const hasSolarProgress = computed(() => props.solarAnalysisTarget > 0);
+const shouldShowAnalysisLabel = computed(
+  () => props.solarAnalyzedCount > 0 || hasSolarProgress.value || props.isComplete,
+);
+const analysisLabel = computed(() => formatSolarAnalysisProgress(props.solarAnalyzedCount, props.solarAnalysisTarget));
 const progressWidth = computed(() => {
   if (!hasSolarProgress.value) return "0%";
   const ratio = Math.min(100, Math.max(0, (props.solarAnalyzedCount / props.solarAnalysisTarget) * 100));
@@ -146,7 +151,13 @@ const progressWidth = computed(() => {
 });
 const progressHint = computed(() => {
   if (props.isComplete) {
-    return `${props.solarAnalyzedCount} of ${props.solarAnalysisTarget || props.solarAnalyzedCount} solar analyses completed.`;
+    if (props.strongLeadCount === 0) {
+      if (props.solarAnalysisTarget === 0 && props.discoveredCount > 0) {
+        return "No candidates met the current solar capacity filter.";
+      }
+      return `${props.discoveredCount} properties were checked in this area.`;
+    }
+    return `${analysisLabel.value} completed.`;
   }
   if (props.stage === "DATA_COVERAGE_UNAVAILABLE") {
     return "Try a different location or widen the radius.";
@@ -154,8 +165,8 @@ const progressHint = computed(() => {
   if (!props.isScanning) {
     return "No scan is running.";
   }
-  if (hasSolarProgress.value) {
-    return `Analyzing solar ${props.solarAnalyzedCount} / ${props.solarAnalysisTarget}`;
+  if (props.solarAnalyzedCount > 0 || hasSolarProgress.value) {
+    return analysisLabel.value;
   }
   return "More results may appear while discovery continues.";
 });

@@ -21,6 +21,9 @@ import type {
   TodayDashboard,
   OpportunitySignal,
   ImageryCapabilitiesResponse,
+  MarketAreaDetail,
+  MarketEventsResponse,
+  MarketHotspotsResponse,
 } from "@solar/contracts";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
@@ -284,6 +287,9 @@ async function waitForDiscoveryScan(scanId: string): Promise<DiscoveryScanResult
     analyzedCount: current.analyzedCount,
     googleSolarCalls: current.googleSolarCalls,
     estimatedCostUsd: current.estimatedCostUsd,
+    propertiesFound: current.propertiesFound,
+    qualifiedLeadCount: current.qualifiedLeadCount,
+    solarAnalyzedCount: current.solarAnalyzedCount,
     results,
   };
 }
@@ -319,6 +325,39 @@ export async function getRouteNext(routeId: string): Promise<RouteNextResponse |
 
 export async function getPropertyDataQuality(id: string): Promise<PropertyDataQualityResponse | null> {
   return requestJson<PropertyDataQualityResponse>(`/api/v1/properties/${encodeURIComponent(id)}/data-quality`);
+}
+
+export async function getMarketHotspots(params: {
+  latitude: number;
+  longitude: number;
+  radiusMiles: number;
+  days: number;
+}): Promise<MarketHotspotsResponse | null> {
+  const query = new URLSearchParams({
+    latitude: String(params.latitude),
+    longitude: String(params.longitude),
+    radiusMiles: String(params.radiusMiles),
+    days: String(params.days),
+  });
+  return requestJson<MarketHotspotsResponse>(`/api/v1/markets/hotspots?${query.toString()}`);
+}
+
+export async function getMarketArea(id: string): Promise<MarketAreaDetail | null> {
+  return requestJson<MarketAreaDetail>(`/api/v1/markets/${encodeURIComponent(id)}`);
+}
+
+export async function getMarketEvents(
+  marketId: string,
+  cursor?: string | null,
+  limit = 20,
+): Promise<MarketEventsResponse | null> {
+  const params = new URLSearchParams();
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  params.set("limit", String(limit));
+  const suffix = params.toString();
+  return requestJson<MarketEventsResponse>(`/api/v1/markets/${encodeURIComponent(marketId)}/events${suffix ? `?${suffix}` : ""}`);
 }
 
 export async function updateLeadOutcome(propertyId: string, outcome: LeadOutcome["outcome"], notes: string | null): Promise<LeadOutcome | null> {

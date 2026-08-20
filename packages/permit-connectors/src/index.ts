@@ -1,5 +1,6 @@
 export * from "../../contracts/src/index";
 export * from "./connectors";
+export * from "./market";
 
 export const permitTaxonomyRules = [
   {

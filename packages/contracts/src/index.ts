@@ -456,6 +456,133 @@ export interface NeighborhoodMarket {
   ctaLabel: "VIEW LEADS" | "DISCOVER MORE";
 }
 
+export const MarketEventType = {
+  ROOF_PERMIT: "ROOF_PERMIT",
+  SOLAR_PERMIT: "SOLAR_PERMIT",
+  NEW_CONSTRUCTION: "NEW_CONSTRUCTION",
+  REMODEL: "REMODEL",
+  ELECTRICAL_UPGRADE: "ELECTRICAL_UPGRADE",
+  EV_CHARGER: "EV_CHARGER",
+  BATTERY: "BATTERY",
+  OTHER: "OTHER",
+} as const;
+
+export type MarketEventType = (typeof MarketEventType)[keyof typeof MarketEventType];
+
+export type MarketCoverageLevel = "HIGH" | "MEDIUM" | "LOW" | "UNAVAILABLE";
+
+export interface MarketEvent {
+  id: string;
+  type: MarketEventType;
+  address: string | null;
+  municipality: string | null;
+  county: string | null;
+  state: string;
+  latitude: number | null;
+  longitude: number | null;
+  issuedDate: string | null;
+  status: string | null;
+  estimatedValue: number | null;
+  source: string;
+  sourceRecordId: string | null;
+  sourceUrl: string | null;
+  fetchedAt: string;
+  confidence: number;
+}
+
+export interface MarketEventCounts {
+  roofPermits: number;
+  solarPermits: number;
+  newConstruction: number;
+  remodel: number;
+  electricalUpgrades: number;
+  evChargers: number;
+  batteries: number;
+  other: number;
+  total: number;
+}
+
+export interface MarketOpportunityScoreBreakdown {
+  roofActivity: number;
+  constructionActivity: number;
+  solarMomentum: number;
+  solarSaturation: number;
+  largePropertyDensity: number;
+  highCapacityRoofDensity: number;
+  propertyValueSignal: number;
+  electricalUpgradeActivity: number;
+  dataConfidence: number;
+}
+
+export interface MarketOpportunityScore {
+  score: number;
+  confidence: number;
+  breakdown: MarketOpportunityScoreBreakdown;
+}
+
+export interface MarketProvenance {
+  source: string;
+  isFixture: boolean;
+  fetchedAt: string;
+  notes?: string[] | null;
+}
+
+export interface MarketCoverageSummary {
+  level: MarketCoverageLevel;
+  confidence: number;
+  availableSignals: string[];
+  missingSignals: string[];
+  warnings: string[];
+}
+
+export interface MarketAreaSummary {
+  id: string;
+  name: string;
+  geographyType: "ZIP" | "MUNICIPALITY" | "GRID_CELL" | "NEIGHBORHOOD";
+  label: string;
+  currentLocationLabel: string;
+  centerLatitude: number;
+  centerLongitude: number;
+  radiusMiles: number;
+  marketScore: number;
+  solarMomentumScore: number;
+  solarSaturationScore: number;
+  leadOpportunityCount: number;
+  largePropertyCount: number;
+  highCapacityRoofCount: number;
+  counts: MarketEventCounts;
+  coverage: MarketCoverageSummary;
+  whyHot: string[];
+}
+
+export interface MarketHotspotsResponse {
+  center: ScanCenter;
+  radiusMiles: number;
+  days: number;
+  provenance: MarketProvenance;
+  areas: MarketAreaSummary[];
+}
+
+export interface MarketAreaDetail extends MarketAreaSummary {
+  scoreBreakdown: MarketOpportunityScoreBreakdown;
+  recentActivity: MarketEvent[];
+  leadOpportunityCounts: {
+    whales: number;
+    highPriority: number;
+    total: number;
+  };
+  provenance: MarketProvenance;
+}
+
+export interface MarketEventsResponse {
+  marketId: string;
+  provenance: MarketProvenance;
+  results: MarketEvent[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  totalAvailable: number;
+}
+
 export interface DiscoverResponse {
   currentLocation: string;
   radiusMiles: number;
@@ -598,6 +725,9 @@ export interface DiscoveryScanResult {
   analyzedCount: number;
   googleSolarCalls: number;
   estimatedCostUsd: number;
+  propertiesFound: number;
+  qualifiedLeadCount: number;
+  solarAnalyzedCount: number;
   results: DiscoveryScanLead[];
 }
 
@@ -606,17 +736,23 @@ export interface DiscoveryScanResultsPage {
   nextCursor: string | null;
   hasMore: boolean;
   totalAvailable: number;
+  qualifiedLeadCount: number;
 }
 
 export interface DiscoveryScanMetrics {
+  rawDiscoveredCount: number;
+  residentialCandidateCount: number;
+  prequalifiedCount: number;
+  solarEligibleCount: number;
+  solarAnalyzedCount: number;
+  qualifiedLeadCount: number;
+  renderedLeadCount: number;
   discoveredProperties: number;
   discoveredCount: number;
   knownProperties: number;
-  prequalifiedCount: number;
   newProperties: number;
   prequalifiedCandidates: number;
   solarCalls: number;
-  solarAnalyzedCount: number;
   solarCallBudget: number;
   largeOpportunities: number;
   whaleCandidates: number;

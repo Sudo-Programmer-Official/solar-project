@@ -136,16 +136,16 @@ async function syncAndLoad() {
 function matchesFilters(lead: TodayLeadCard) {
   const reasons = lead.reasons.join(" ").toLowerCase();
   const signals = lead.signals.join(" ").toLowerCase();
-  const roof = lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw ?? 0;
+  const roof = lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw ?? null;
   const filters = searchContextStore.filters;
 
   if (filters.whaleCandidates && lead.whaleScore < 60) return false;
   if (filters.highPriority && lead.opportunityScore < 70) return false;
   if (filters.revisit && lead.outcome !== "NOT_HOME" && lead.outcome !== "BILL_REQUESTED") return false;
-  if (filters.minimumSystemKw != null && roof < filters.minimumSystemKw) return false;
+  if (filters.minimumSystemKw != null && roof != null && roof < filters.minimumSystemKw) return false;
   if (filters.recentRoofPermit && !signals.includes("recent roof permit")) return false;
   if (filters.noDetectedSolar && signals.includes("existing solar")) return false;
-  if (filters.largeProperty && !(reasons.includes("large roof") || roof >= 15)) return false;
+  if (filters.largeProperty && !(reasons.includes("large roof") || (roof != null && roof >= 15))) return false;
   if (filters.highValueArea && !reasons.includes("high-value area")) return false;
   return true;
 }

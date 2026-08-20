@@ -25,6 +25,7 @@ export const useHuntStore = defineStore("hunt", () => {
   const scanProgress = ref<DiscoveryScanStatusResponse | null>(null);
   const scanSignature = ref<string | null>(null);
   const scanResults = ref<DiscoveryScanLead[]>([]);
+  const loadedPropertyIds = ref<string[]>([]);
   const scanResultsCursor = ref<string | null>(null);
   const scanResultsHasMore = ref(false);
   const scanResultsTotal = ref(0);
@@ -72,10 +73,10 @@ export const useHuntStore = defineStore("hunt", () => {
   const scanStage = computed(() => scanStatus.value);
   const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !["COMPLETE", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"].includes(scanStatus.value)));
   const isComplete = computed(() => scanStatus.value === "COMPLETE");
-  const discoveredCount = computed(() => scanProgress.value?.metrics.discoveredCount ?? scanProgress.value?.metrics.discoveredProperties ?? 0);
-  const strongLeadCount = computed(() => scanProgress.value?.metrics.resultsFound ?? scanResults.value.length ?? 0);
-  const solarAnalyzedCount = computed(() => scanProgress.value?.metrics.solarAnalyzedCount ?? 0);
-  const solarAnalysisTarget = computed(() => scanProgress.value?.metrics.prequalifiedCount ?? 0);
+  const discoveredCount = computed(() => scanProgress.value?.propertiesFound ?? scanProgress.value?.metrics.rawDiscoveredCount ?? scanProgress.value?.metrics.discoveredCount ?? scanProgress.value?.metrics.discoveredProperties ?? 0);
+  const strongLeadCount = computed(() => scanProgress.value?.metrics.qualifiedLeadCount ?? scanProgress.value?.qualifiedLeadCount ?? scanResults.value.length ?? 0);
+  const solarAnalyzedCount = computed(() => scanProgress.value?.metrics.solarAnalyzedCount ?? scanProgress.value?.solarAnalyzedCount ?? 0);
+  const solarAnalysisTarget = computed(() => scanProgress.value?.metrics.solarEligibleCount ?? scanProgress.value?.metrics.prequalifiedCount ?? 0);
   const totalAvailable = computed(() => scanResultsTotal.value);
 
   function setRadius(value: 5 | 10 | 20) {
@@ -151,12 +152,16 @@ export const useHuntStore = defineStore("hunt", () => {
 
       currentScanId.value = job.scanId;
       scanSignature.value = buildScanSignature(center, committedRadius, committedFilters);
-      scanProgress.value = await getDiscoveryScan(job.scanId);
+      const initialProgress = await getDiscoveryScan(job.scanId);
       if (!isCurrentScanSession(sessionId)) {
         return emptyScanResult(committedRadius, center);
       }
-      scan.value = scanProgress.value;
+      if (initialProgress) {
+        scanProgress.value = initialProgress;
+        scan.value = initialProgress;
+      }
       scanResults.value = [];
+      loadedPropertyIds.value = [];
       scanResultsCursor.value = null;
       scanResultsHasMore.value = false;
       scanResultsTotal.value = 0;
@@ -167,12 +172,15 @@ export const useHuntStore = defineStore("hunt", () => {
         if (!isCurrentScanSession(sessionId)) {
           return emptyScanResult(committedRadius, center);
         }
-        scanProgress.value = await getDiscoveryScan(job.scanId);
+        const nextProgress = await getDiscoveryScan(job.scanId);
         if (!isCurrentScanSession(sessionId)) {
           return emptyScanResult(committedRadius, center);
         }
-        scan.value = scanProgress.value;
-        if (scanProgress.value && scanProgress.value.metrics.resultsFound > 0 && scanResults.value.length === 0) {
+        if (nextProgress) {
+          scanProgress.value = nextProgress;
+          scan.value = nextProgress;
+        }
+        if (scanProgress.value && (scanProgress.value.metrics.qualifiedLeadCount ?? scanProgress.value.metrics.resultsFound) > 0 && scanResults.value.length === 0) {
           await loadScanResultsPage({ reset: true, scanId: job.scanId, sessionId });
         }
       }
@@ -275,6 +283,7 @@ export const useHuntStore = defineStore("hunt", () => {
     scanProgress,
     scanSignature,
     scanResults,
+    loadedPropertyIds,
     scanResultsCursor,
     scanResultsHasMore,
     scanResultsTotal,
@@ -336,9 +345,10 @@ async function loadScanResultsPage(options: { reset?: boolean; scanId?: string; 
 
     if (options.reset) {
       store.scanResults = [];
+      store.loadedPropertyIds = [];
     }
 
-    const existingIds = new Set(store.scanResults.map((lead) => lead.propertyId ?? lead.id));
+    const existingIds = new Set(store.loadedPropertyIds);
     const nextResults = page.results.filter((lead) => {
       const key = lead.propertyId ?? lead.id;
       if (existingIds.has(key)) {
@@ -349,9 +359,10 @@ async function loadScanResultsPage(options: { reset?: boolean; scanId?: string; 
     });
 
     store.scanResults = [...store.scanResults, ...nextResults];
+    store.loadedPropertyIds = [...existingIds];
     store.scanResultsCursor = page.nextCursor;
     store.scanResultsHasMore = page.hasMore;
-    store.scanResultsTotal = page.totalAvailable;
+    store.scanResultsTotal = page.qualifiedLeadCount ?? page.totalAvailable;
     return page;
   } finally {
     store.scanResultsLoading = false;
@@ -364,6 +375,7 @@ function resetScanSnapshot() {
   store.scanProgress = null;
   store.scanSignature = null;
   store.scanResults = [];
+  store.loadedPropertyIds = [];
   store.scanResultsCursor = null;
   store.scanResultsHasMore = false;
   store.scanResultsTotal = 0;
@@ -378,6 +390,7 @@ function beginScanSession(signature: string): number {
   store.scan = null;
   store.scanProgress = null;
   store.scanResults = [];
+  store.loadedPropertyIds = [];
   store.scanResultsCursor = null;
   store.scanResultsHasMore = false;
   store.scanResultsTotal = 0;
@@ -427,6 +440,9 @@ function emptyScanResult(
     analyzedCount: 0,
     googleSolarCalls: 0,
     estimatedCostUsd: 0,
+    propertiesFound: 0,
+    qualifiedLeadCount: 0,
+    solarAnalyzedCount: 0,
     results: [],
   };
 }

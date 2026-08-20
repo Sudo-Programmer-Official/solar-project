@@ -15,21 +15,6 @@
       </p>
     </section>
 
-    <ScanProgressPanel
-      v-if="showScanProgress"
-      class="mt-4"
-      :location-label="scanLocationLabel"
-      :stage="scanStatus"
-      :is-scanning="hunt.isScanning"
-      :is-complete="hunt.isComplete"
-      :discovered-count="discoveredCount"
-      :strong-lead-count="strongLeadCount"
-      :solar-analyzed-count="solarAnalyzedCount"
-      :solar-analysis-target="solarAnalysisTarget"
-      :error="scanError"
-      @retry="runScan"
-    />
-
     <section class="mt-4 page-surface p-4">
       <div class="flex items-center justify-between gap-3">
         <div>
@@ -59,7 +44,7 @@
         </div>
       </div>
       <p class="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-        {{ scan?.analyzedCount ?? 0 }} analyzed · {{ scan?.candidateCount ?? 0 }} candidates · {{ scan?.googleSolarCalls ?? 0 }} Google Solar calls
+        {{ discoveredCount }} properties checked · {{ strongLeadCount }} strong leads · {{ solarAnalyzedCount }} solar analyses
       </p>
     </section>
 
@@ -80,8 +65,38 @@
 
     <section v-if="currentView === 'map'" class="mt-4 grid gap-4">
       <LeadCardSkeleton v-if="hunt.isScanning && results.length === 0" />
+      <div v-else-if="showLoadMismatch" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">Lead cards failed to load.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">The scan found strong leads, but the results page did not return any cards.</p>
+        <button class="touch-target mt-5 rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm" @click="runScan">
+          Retry scan
+        </button>
+      </div>
+      <div v-else-if="showZeroLeadState" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">{{ emptyStateTitle }}</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">{{ emptyStateMessage }}</p>
+        <div class="mt-5 grid gap-2 sm:grid-cols-2">
+          <button
+            v-if="suggestedLowerCapacity != null"
+            class="touch-target rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm"
+            @click="lowerCapacityAndRescan"
+          >
+            Try {{ suggestedLowerCapacity }}+ kW
+          </button>
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="clearFiltersAndRescan">
+            Clear filters
+          </button>
+        </div>
+      </div>
+      <div v-else-if="showClusterEmptyState" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">No cards in this cluster.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">Clear the cluster selection to view all {{ strongLeadCount }} leads.</p>
+        <button class="touch-target mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="clearClusterFilter">
+          Show all leads
+        </button>
+      </div>
       <EmptyState
-        v-else-if="results.length === 0"
+        v-else-if="results.length === 0 && !hunt.isScanning"
         :title="emptyStateTitle"
         :message="emptyStateMessage"
         action-label="Find Best Doors"
@@ -121,10 +136,40 @@
       <template v-if="hunt.isScanning && results.length === 0">
         <LeadCardSkeleton v-for="item in skeletonCount" :key="`lead-skeleton-${item}`" />
       </template>
+      <div v-else-if="showLoadMismatch" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">Lead cards failed to load.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">The scan found strong leads, but the results page did not return any cards.</p>
+        <button class="touch-target mt-5 rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm" @click="runScan">
+          Retry scan
+        </button>
+      </div>
+      <div v-else-if="showZeroLeadState" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">{{ emptyStateTitle }}</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">{{ emptyStateMessage }}</p>
+        <div class="mt-5 grid gap-2 sm:grid-cols-2">
+          <button
+            v-if="suggestedLowerCapacity != null"
+            class="touch-target rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm"
+            @click="lowerCapacityAndRescan"
+          >
+            Try {{ suggestedLowerCapacity }}+ kW
+          </button>
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="clearFiltersAndRescan">
+            Clear filters
+          </button>
+        </div>
+      </div>
+      <div v-else-if="showClusterEmptyState" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">No cards in this cluster.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">Clear the cluster selection to view all {{ strongLeadCount }} leads.</p>
+        <button class="touch-target mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="clearClusterFilter">
+          Show all leads
+        </button>
+      </div>
       <EmptyState
         v-else-if="results.length === 0 && !hunt.isScanning"
-        title="No doors in this radius yet"
-        message="Open a wider radius or clear filters."
+        :title="emptyStateTitle"
+        :message="emptyStateMessage"
         action-label="Find Best Doors"
         @action="runScan"
       />
@@ -271,8 +316,8 @@ import LeadCard from "./LeadCard.vue";
 import LoadingCard from "./LoadingCard.vue";
 import EmptyState from "./EmptyState.vue";
 import MobileHeader from "./MobileHeader.vue";
-import ScanProgressPanel from "./ScanProgressPanel.vue";
 import LeadCardSkeleton from "./LeadCardSkeleton.vue";
+import { formatSolarAnalysisProgress } from "../utils/scanProgress";
 
 const props = withDefaults(defineProps<{
   initialView?: "list" | "map";
@@ -317,20 +362,11 @@ const selectedIds = computed(() => new Set(hunt.selectedPropertyIds));
 const selectedCount = computed(() => selectedIds.value.size);
 const scan = computed(() => hunt.scan);
 const scanStatus = computed(() => hunt.scanStatus);
-const showScanProgress = computed(() => Boolean(scanStatus.value || hunt.isScanning || hunt.error));
 const discoveredCount = computed(() => hunt.discoveredCount);
 const strongLeadCount = computed(() => hunt.strongLeadCount);
 const solarAnalyzedCount = computed(() => hunt.solarAnalyzedCount);
 const solarAnalysisTarget = computed(() => hunt.solarAnalysisTarget);
-const scanError = computed(() => {
-  if (hunt.error) return hunt.error;
-  if (scanStatus.value === "FAILED" || scanStatus.value === "DISCOVERY_FAILED") {
-    return "We couldn't finish this scan.";
-  }
-  return null;
-});
 const skeletonCount = computed(() => (results.value.length === 0 ? 3 : 2));
-const scanLocationLabel = computed(() => searchContextStore.contextLabel || "selected location");
 const searchStoreRadiusLabel = computed(() => `${searchContextStore.radiusMiles} mi radius`);
 const currentLatitude = computed(() => resolvedLocation.value?.latitude ?? hunt.lastLatitude ?? null);
 const currentLongitude = computed(() => resolvedLocation.value?.longitude ?? hunt.lastLongitude ?? null);
@@ -356,44 +392,23 @@ const summaryLabel = computed(() => {
     return "Ranking opportunities";
   }
   if (scanStatus.value === "SOLAR_ANALYSIS") {
-    return `Analyzing solar ${solarAnalyzedCount.value} / ${solarAnalysisTarget.value}`;
+    return formatSolarAnalysisProgress(solarAnalyzedCount.value, solarAnalysisTarget.value);
   }
   if (scanStatus.value === "FINAL_RANKING") {
     return "Building your best leads";
   }
+  if (hunt.isComplete && strongLeadCount.value === 0) {
+    return "No leads match these filters.";
+  }
   if (!hunt.isComplete) {
     return `${strongLeadCount.value} strong leads found so far`;
   }
-  return `${results.value.length} strong leads loaded`;
-});
-const progressTitle = computed(() => {
-  if (!scanStatus.value) return "Ready to scan";
-  if (scanStatus.value === "DISCOVERY_FAILED" || scanStatus.value === "FAILED") return "Scan failed";
-  if (scanStatus.value === "DISCOVERING") return "Finding properties";
-  if (scanStatus.value === "PRE_RANKING") return "Ranking opportunities";
-  if (scanStatus.value === "SOLAR_ANALYSIS") return "Analyzing solar";
-  if (scanStatus.value === "FINAL_RANKING") return "Building final lead list";
-  if (scanStatus.value === "DATA_COVERAGE_UNAVAILABLE") return "Property data unavailable";
-  return "Scan complete";
-});
-const progressSubtitle = computed(() => {
-  if (!scanStatus.value) return "Choose a location and scan a radius to rank opportunities.";
-  if (scanStatus.value === "DISCOVERY_FAILED" || scanStatus.value === "FAILED") return "Provider discovery failed. Try again.";
-  if (scanStatus.value === "DISCOVERING") return "Finding residential properties nearby.";
-  if (scanStatus.value === "PRE_RANKING") return "Scoring likely solar candidates.";
-  if (scanStatus.value === "SOLAR_ANALYSIS") return `Analyzing solar ${solarAnalyzedCount.value} / ${solarAnalysisTarget.value}`;
-  if (scanStatus.value === "DATA_COVERAGE_UNAVAILABLE") return "Property data isn’t available for this area yet.";
-  return results.value.length > 0
-    ? `${results.value.length} strong leads found`
-    : "No strong leads found yet.";
+  return `${strongLeadCount.value} strong leads loaded`;
 });
 const loadedResultsLabel = computed(() => {
   const total = scanResultsTotal.value || strongLeadCount.value || results.value.length;
   if (total <= 0) {
     return "No leads loaded yet";
-  }
-  if (visibleResults.value.length !== results.value.length) {
-    return `${visibleResults.value.length} shown · ${results.value.length} loaded of ${total}`;
   }
   return `${results.value.length} of ${total} leads loaded`;
 });
@@ -403,13 +418,21 @@ const nextRadiusSuggestion = computed<10 | 20 | null>(() => {
   return null;
 });
 const emptyStateTitle = computed(() =>
-  searchContextStore.context ? "No discovered leads in this area yet" : "Choose a location first",
+  searchContextStore.context ? "No leads match these filters." : "Choose a location first",
 );
 const emptyStateMessage = computed(() =>
   searchContextStore.context
-    ? "This location has no ranked properties in the current dataset. Try a different area or widen the search radius."
+    ? `We checked ${discoveredCount.value} properties in this area.`
     : "Pick a location and then scan a radius to rank opportunities.",
 );
+const suggestedLowerCapacity = computed<12 | 15 | null>(() => {
+  if (searchContextStore.filters.minimumSystemKw === 20) return 15;
+  if (searchContextStore.filters.minimumSystemKw === 15) return 12;
+  return null;
+});
+const showLoadMismatch = computed(() => hunt.isComplete && strongLeadCount.value > 0 && !scanResultsLoading.value && results.value.length === 0);
+const showZeroLeadState = computed(() => hunt.isComplete && strongLeadCount.value === 0 && !showLoadMismatch.value);
+const showClusterEmptyState = computed(() => hunt.isComplete && results.value.length > 0 && visibleResults.value.length === 0 && !showLoadMismatch.value && !showZeroLeadState.value);
 const visibleResults = computed(() => {
   if (!activeClusterKey.value) return results.value;
   return results.value.filter((lead) => clusterKeyForLead(lead) === activeClusterKey.value);
@@ -599,6 +622,23 @@ function recenterMap() {
   selectedPinId.value = null;
 }
 
+function clearClusterFilter() {
+  activeClusterKey.value = null;
+}
+
+async function lowerCapacityAndRescan() {
+  if (suggestedLowerCapacity.value == null) {
+    return;
+  }
+  searchContextStore.setMinimumSystemKw(suggestedLowerCapacity.value);
+  await runScan();
+}
+
+async function clearFiltersAndRescan() {
+  searchContextStore.resetFilters();
+  await runScan();
+}
+
 async function runScan() {
   const context = searchContextStore.context;
   if (!resolvedLocation.value && !context) {
@@ -610,6 +650,9 @@ async function runScan() {
     locationError.value = "Choose a location first.";
     return;
   }
+  activeClusterKey.value = null;
+  selectedPinId.value = null;
+  currentView.value = "list";
   await hunt.runScan({
     latitude: center.latitude,
     longitude: center.longitude,

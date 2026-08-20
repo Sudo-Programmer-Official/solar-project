@@ -132,6 +132,110 @@ CREATE TABLE IF NOT EXISTS permit_records (
 
 CREATE INDEX IF NOT EXISTS idx_permit_records_type_status ON permit_records (permit_type, status);
 
+CREATE TABLE IF NOT EXISTS market_areas (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  geography_type TEXT NOT NULL,
+  label TEXT NOT NULL,
+  current_location_label TEXT NOT NULL,
+  center_location GEOGRAPHY(POINT, 4326),
+  center_latitude DOUBLE PRECISION,
+  center_longitude DOUBLE PRECISION,
+  radius_miles NUMERIC,
+  coverage_level TEXT NOT NULL DEFAULT 'UNAVAILABLE',
+  market_score NUMERIC NOT NULL DEFAULT 0,
+  score_breakdown_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  provenance_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_areas_location ON market_areas USING GIST (center_location);
+CREATE INDEX IF NOT EXISTS idx_market_areas_geography_type ON market_areas (geography_type);
+
+CREATE TABLE IF NOT EXISTS market_area_scores (
+  id UUID PRIMARY KEY,
+  market_area_id TEXT NOT NULL REFERENCES market_areas(id) ON DELETE CASCADE,
+  roof_activity NUMERIC NOT NULL DEFAULT 0,
+  construction_activity NUMERIC NOT NULL DEFAULT 0,
+  solar_momentum NUMERIC NOT NULL DEFAULT 0,
+  solar_saturation NUMERIC NOT NULL DEFAULT 0,
+  large_property_density NUMERIC NOT NULL DEFAULT 0,
+  high_capacity_roof_density NUMERIC NOT NULL DEFAULT 0,
+  property_value_signal NUMERIC NOT NULL DEFAULT 0,
+  electrical_upgrade_activity NUMERIC NOT NULL DEFAULT 0,
+  data_confidence NUMERIC NOT NULL DEFAULT 0,
+  market_score NUMERIC NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_area_scores_market_area_id ON market_area_scores (market_area_id);
+
+CREATE TABLE IF NOT EXISTS market_events (
+  id TEXT PRIMARY KEY,
+  market_area_id TEXT NOT NULL REFERENCES market_areas(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  address TEXT,
+  municipality TEXT,
+  county TEXT,
+  state TEXT NOT NULL,
+  location GEOGRAPHY(POINT, 4326),
+  latitude DOUBLE PRECISION,
+  longitude DOUBLE PRECISION,
+  issued_date DATE,
+  status TEXT,
+  estimated_value NUMERIC,
+  source TEXT NOT NULL,
+  source_record_id TEXT,
+  source_url TEXT,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confidence NUMERIC NOT NULL DEFAULT 0,
+  event_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_events_issued_date ON market_events (issued_date);
+CREATE INDEX IF NOT EXISTS idx_market_events_location ON market_events USING GIST (location);
+CREATE INDEX IF NOT EXISTS idx_market_events_type ON market_events (type);
+CREATE INDEX IF NOT EXISTS idx_market_events_source_record_id ON market_events (source_record_id);
+
+CREATE TABLE IF NOT EXISTS market_event_sources (
+  id UUID PRIMARY KEY,
+  market_area_id TEXT REFERENCES market_areas(id) ON DELETE SET NULL,
+  provider_id TEXT NOT NULL,
+  source_record_id TEXT,
+  source_url TEXT,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confidence NUMERIC NOT NULL DEFAULT 0,
+  source_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_event_sources_provider_id ON market_event_sources (provider_id);
+CREATE INDEX IF NOT EXISTS idx_market_event_sources_source_record_id ON market_event_sources (source_record_id);
+
+CREATE TABLE IF NOT EXISTS market_ingestion_runs (
+  id UUID PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  center_latitude DOUBLE PRECISION,
+  center_longitude DOUBLE PRECISION,
+  radius_miles NUMERIC,
+  date_from DATE,
+  date_to DATE,
+  events_ingested INTEGER NOT NULL DEFAULT 0,
+  areas_touched INTEGER NOT NULL DEFAULT 0,
+  provenance_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_ingestion_runs_provider_id ON market_ingestion_runs (provider_id);
+CREATE INDEX IF NOT EXISTS idx_market_ingestion_runs_started_at ON market_ingestion_runs (started_at);
+
 CREATE TABLE IF NOT EXISTS lead_outcomes (
   id UUID PRIMARY KEY,
   property_id UUID NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
