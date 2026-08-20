@@ -15,6 +15,30 @@
       </p>
     </section>
 
+    <section v-if="showSwipeDeck" class="mt-4 md:hidden">
+      <SwipeHuntDeck
+        :lead="swipeDeckLead"
+        :preload-leads="swipeDeckResults.slice(1, 3)"
+        :review-label="swipeReviewLabel"
+        :saved-count="swipeSavedCount"
+        :remaining-count="swipeRemainingCount"
+        :has-more="scanResultsHasMore"
+        :loading-more="scanResultsLoading"
+        :is-scanning="hunt.isScanning"
+        :empty-title="emptyStateTitle"
+        :empty-message="emptyStateMessage"
+        :next-radius-suggestion="nextRadiusSuggestion"
+        @save="saveCurrentSwipeLead"
+        @skip="skipCurrentSwipeLead"
+        @navigate="navigateCurrentSwipeLead"
+        @open="openCurrentSwipeLead"
+        @build-route="buildRouteFromSaved"
+        @load-more="loadMore"
+        @expand-radius="expandRadius"
+      />
+    </section>
+
+    <template v-else>
     <section class="mt-4 page-surface p-4">
       <div class="flex items-center justify-between gap-3">
         <div>
@@ -298,13 +322,15 @@
         </div>
       </div>
     </div>
+    </template>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, h, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
+import { ElNotification } from "element-plus";
 import type { DiscoveryScanLead, LocationResolveResponse } from "@solar/contracts";
 import { useCurrentLocation } from "../composables/useCurrentLocation";
 import { useLeadActions } from "../composables/useLeadActions";
@@ -317,6 +343,7 @@ import LoadingCard from "./LoadingCard.vue";
 import EmptyState from "./EmptyState.vue";
 import MobileHeader from "./MobileHeader.vue";
 import LeadCardSkeleton from "./LeadCardSkeleton.vue";
+import SwipeHuntDeck from "./SwipeHuntDeck.vue";
 import { formatSolarAnalysisProgress } from "../utils/scanProgress";
 
 const props = withDefaults(defineProps<{
@@ -330,7 +357,10 @@ const hunt = useHuntStore();
 const searchContextStore = useSearchContextStore();
 const currentLocation = useCurrentLocation();
 const { openDirections } = useLeadActions();
-const { scanResults, loading, routeLoading, scanProgress, scanResultsTotal, scanResultsHasMore, scanResultsLoading } = storeToRefs(hunt);
+const { scanResults, loading, routeLoading, scanProgress, scanResultsTotal, scanResultsHasMore, scanResultsLoading, swipeDeckLead, swipeDeckResults, swipeReviewLabel, swipeSavedCount, swipeRemainingCount } = storeToRefs(hunt);
+const isSwipeHuntMode = computed(() => router.currentRoute.value.path === "/hunt");
+const isMobileViewport = ref(false);
+const showSwipeDeck = computed(() => isSwipeHuntMode.value && isMobileViewport.value);
 const currentView = ref<"list" | "map">(props.initialView);
 const selectedPinId = ref<string | null>(null);
 const activeClusterKey = ref<string | null>(null);
@@ -375,7 +405,7 @@ const summary = computed(() => ({
   whales: results.value.filter((lead) => lead.whaleScore >= 60).length,
   large: results.value.filter((lead) => (lead.maxRoofSolarCapacityKw ?? 0) >= 15).length,
   permits: results.value.filter((lead) => lead.reasons.some((reason) => reason.toLowerCase().includes("permit"))).length,
-  revisits: results.value.filter((lead) => lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
+  revisits: results.value.filter((lead) => lead.outcome === "REVISIT" || lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
 }));
 const summaryLabel = computed(() => {
   if (!scanStatus.value && !hunt.isScanning) return "Pick a location, then scan a radius to rank opportunities.";
@@ -447,6 +477,9 @@ const selectedLeadSummary = computed(() => {
   if (!selectedLead.value) return "Tap a pin to inspect a lead.";
   return `Opportunity ${selectedLead.value.opportunityScore} · ${selectedLead.value.nextBestAction.label}`;
 });
+const savedLeadIds = computed(() =>
+  results.value.filter((lead) => lead.outcome === "SAVED").map((lead) => lead.propertyId ?? lead.id),
+);
 const selectedLeadTitle = computed(() =>
   formatLeadTitle(selectedLead.value?.address, selectedLead.value?.city, selectedLead.value?.state, selectedLead.value?.postalCode),
 );
@@ -521,6 +554,12 @@ const mapPoints = computed<PropertyVisualPoint[]>(() => {
 onMounted(() => {
   loadRecentSearches();
   syncResolvedLocationFromContext();
+  syncViewport();
+  window.addEventListener("resize", syncViewport);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", syncViewport);
 });
 
 watch(
@@ -540,6 +579,13 @@ function loadRecentSearches() {
   } catch {
     recentSearches.value = [];
   }
+}
+
+function syncViewport() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  isMobileViewport.value = window.innerWidth < 768;
 }
 
 function saveRecentSearches() {
@@ -663,6 +709,40 @@ async function loadMore() {
   await hunt.loadMoreResults();
 }
 
+async function saveCurrentSwipeLead() {
+  const lead = swipeDeckLead.value;
+  if (!lead) return;
+  await hunt.setLeadDisposition(lead.propertyId ?? lead.id, "SAVED");
+  showSwipeUndoToast("Lead saved");
+}
+
+async function skipCurrentSwipeLead() {
+  const lead = swipeDeckLead.value;
+  if (!lead) return;
+  await hunt.setLeadDisposition(lead.propertyId ?? lead.id, "SKIPPED");
+  showSwipeUndoToast("Lead skipped");
+}
+
+function navigateCurrentSwipeLead() {
+  const lead = swipeDeckLead.value;
+  if (!lead) return;
+  navigateToLead(lead);
+}
+
+function openCurrentSwipeLead() {
+  const lead = swipeDeckLead.value;
+  if (!lead) return;
+  openLead(lead);
+}
+
+async function buildRouteFromSaved() {
+  if (savedLeadIds.value.length === 0) {
+    return;
+  }
+  await hunt.generateRoute(savedLeadIds.value);
+  await router.push("/route");
+}
+
 async function expandRadius() {
   if (!nextRadiusSuggestion.value) {
     return;
@@ -687,6 +767,30 @@ function syncResolvedLocationFromContext() {
 
 function toggleLead(lead: DiscoveryScanLead) {
   hunt.selectLead(lead.propertyId ?? lead.id);
+}
+
+function showSwipeUndoToast(title: string) {
+  const notification = ElNotification({
+    title,
+    message: h(
+      "button",
+      {
+        type: "button",
+        class:
+          "mt-2 inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm hover:border-primary-200 hover:text-primary-600",
+        onClick: async () => {
+          try {
+            await hunt.undoLastSwipeDisposition();
+          } finally {
+            notification.close();
+          }
+        },
+      },
+      "Undo",
+    ),
+    duration: 3500,
+    position: "top-right",
+  });
 }
 
 function openLead(lead: DiscoveryScanLead | null) {

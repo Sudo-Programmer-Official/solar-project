@@ -1,5 +1,13 @@
 <template>
-  <article class="page-surface overflow-hidden shadow-card">
+  <article
+    class="page-surface overflow-hidden shadow-card"
+    :class="compact ? 'cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-300' : ''"
+    :role="compact ? 'button' : undefined"
+    :tabindex="compact ? 0 : undefined"
+    @click="compact && $emit('open')"
+    @keydown.enter.prevent="compact && $emit('open')"
+    @keydown.space.prevent="compact && $emit('open')"
+  >
     <div class="grid md:grid-cols-[35%_65%]">
       <SatelliteImagePanel
         class="aspect-[16/9] rounded-none border-0 border-b border-slate-200 md:border-b-0 md:border-r"
@@ -24,11 +32,12 @@
               <div class="flex items-start gap-2">
                 <h3 class="text-lg font-semibold text-slate-900">{{ streetLabel }}</h3>
                 <button
+                  v-if="!compact"
                   class="touch-target mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-primary-200 hover:text-primary-500"
                   type="button"
                   aria-label="Copy address"
                   title="Copy address"
-                  @click="copyAddress"
+                  @click.stop="copyAddress"
                 >
                   <el-icon :size="16">
                     <CopyDocument />
@@ -59,18 +68,32 @@
           </div>
         </div>
 
-        <div class="mt-4 grid grid-cols-3 gap-2">
-          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="$emit('navigate')">
+        <div v-if="highValueSignalLabel" class="mt-4">
+          <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+            {{ highValueSignalLabel }}
+          </span>
+        </div>
+
+        <div v-if="!compact" class="mt-4 grid grid-cols-3 gap-2">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click.stop="$emit('navigate')">
             Navigate
           </button>
           <button
             class="touch-target rounded-2xl border px-3 py-3 text-sm font-semibold shadow-sm"
             :class="selected ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-700'"
-            @click="$emit('toggle')"
+            @click.stop="$emit('toggle')"
           >
             {{ selected ? "Added ✓" : "Add to Route" }}
           </button>
-          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="$emit('open')">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click.stop="$emit('open')">
+            Open
+          </button>
+        </div>
+        <div v-else class="mt-4 grid grid-cols-2 gap-2">
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click.stop="$emit('navigate')">
+            Navigate
+          </button>
+          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click.stop="$emit('open')">
             Open
           </button>
         </div>
@@ -91,6 +114,7 @@ import WhaleBadge from "./WhaleBadge.vue";
 const props = defineProps<{
   lead: TodayLeadCard;
   selected?: boolean;
+  compact?: boolean;
 }>();
 
 defineEmits<{
@@ -103,6 +127,30 @@ const streetLabel = computed(() => sanitizeText(props.lead.address) || "Address 
 const locationLabel = computed(() => formatLocationLabel(props.lead.city, props.lead.state, props.lead.postalCode));
 const fullAddress = computed(() => [streetLabel.value, locationLabel.value].filter((item) => item && item !== "Location unavailable").join(", "));
 const distanceLabel = computed(() => (props.lead.distanceMiles == null ? "Distance unknown" : `${props.lead.distanceMiles.toFixed(1)} mi`));
+const highValueSignalLabel = computed(() => {
+  const signal = selectHighValueSignal(props.lead.visualSignals ?? []);
+  if (!signal) return null;
+  switch (signal.type) {
+    case "POOL":
+      return signal.origin === "HOMEOWNER_CONFIRMED" ? "🏊 Pool confirmed" : "🏊 Pool detected";
+    case "EXISTING_SOLAR":
+      return "☀️ Existing solar";
+    case "LARGE_ROOF":
+      return "📐 Large roof";
+    case "LOW_SHADE":
+      return "🌤 Low shade";
+    case "HEAVY_SHADE":
+      return "🌥 Heavy shade";
+    case "DETACHED_GARAGE":
+      return "🏠 Detached garage";
+    case "LARGE_DRIVEWAY":
+      return "🛣 Large driveway";
+    case "LARGE_LOT":
+      return "🌿 Large lot";
+    default:
+      return null;
+  }
+});
 
 function formatNumber(value?: number | null) {
   if (value == null) return "--";
@@ -183,6 +231,20 @@ function sanitizeText(value?: string | null) {
 
 function isPlusCode(value: string) {
   return /(?:^|\s)[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}(?:\s|$)/i.test(value);
+}
+
+function selectHighValueSignal(signals: NonNullable<TodayLeadCard["visualSignals"]>) {
+  return (
+    signals.find((signal) => signal.type === "POOL" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "EXISTING_SOLAR" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "LARGE_ROOF" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "LOW_SHADE" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "HEAVY_SHADE" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "DETACHED_GARAGE" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "LARGE_DRIVEWAY" && signal.status === "DETECTED") ??
+    signals.find((signal) => signal.type === "LARGE_LOT" && signal.status === "DETECTED") ??
+    null
+  );
 }
 
 async function copyAddress() {

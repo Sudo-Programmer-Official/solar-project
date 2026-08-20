@@ -167,6 +167,23 @@
         </div>
 
         <div class="page-surface p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="field-label">Property signals</p>
+              <p class="mt-2 text-sm text-slate-500">Observable features and rep prompts from imagery and property data.</p>
+            </div>
+            <button class="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="openSignalsSheet">
+              Open
+            </button>
+          </div>
+          <div v-if="compactSignalLabel" class="mt-3">
+            <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+              {{ compactSignalLabel }}
+            </span>
+          </div>
+        </div>
+
+        <div class="page-surface p-4">
           <p class="field-label">Opportunity signals</p>
           <div class="mt-3 flex flex-wrap gap-2">
             <SignalChip
@@ -223,14 +240,85 @@
         </div>
       </section>
     </template>
+
+    <transition name="fade">
+      <div v-if="signalsSheetOpen" class="fixed inset-0 z-50 flex items-end bg-slate-950/50 px-3 pb-3 pt-12" @click.self="closeSignalsSheet">
+        <div class="w-full rounded-t-[1.75rem] border border-slate-200 bg-white shadow-2xl">
+          <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4">
+            <div>
+              <p class="field-label">Property Signals</p>
+              <h2 class="mt-1 text-lg font-semibold text-slate-900">{{ displayAddress }}</h2>
+            </div>
+            <button class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600" @click="closeSignalsSheet">
+              Close
+            </button>
+          </div>
+
+          <div class="max-h-[72vh] space-y-5 overflow-y-auto px-4 py-4">
+            <section>
+              <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Property signals</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <SignalChip v-for="signal in signalChips" :key="signal" :label="signal" />
+                <p v-if="signalChips.length === 0" class="text-sm text-slate-500">No observable signals available yet.</p>
+              </div>
+            </section>
+
+            <section>
+              <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Conversation prompts</p>
+              <div class="mt-3 space-y-3">
+                <div v-for="insight in conversationInsights" :key="insight.title" class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p class="text-sm font-semibold text-slate-900">{{ insight.title }}</p>
+                  <p class="mt-1 text-sm text-slate-500">{{ insight.reason }}</p>
+                  <p class="mt-2 text-sm text-slate-700">{{ insight.suggestedQuestion }}</p>
+                  <p class="mt-2 text-xs font-semibold uppercase tracking-[0.08em]" :class="insight.verified ? 'text-emerald-600' : 'text-slate-500'">
+                    {{ insight.verified ? "Homeowner-confirmed" : "Suggested" }}
+                  </p>
+                </div>
+                <p v-if="conversationInsights.length === 0" class="text-sm text-slate-500">No prompts generated yet.</p>
+              </div>
+            </section>
+
+            <section>
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Homeowner confirmations</p>
+                <button
+                  class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  :disabled="savingSignals"
+                  @click="saveSignals"
+                >
+                  Save
+                </button>
+              </div>
+
+              <div class="mt-3 space-y-3">
+                <div v-for="item in confirmationRows" :key="item.key" class="rounded-2xl border border-slate-200 p-3">
+                  <p class="text-sm font-semibold text-slate-900">{{ item.label }}</p>
+                  <div class="mt-3 grid grid-cols-3 gap-2">
+                    <button
+                      v-for="choice in confirmationChoices"
+                      :key="choice.value"
+                      class="rounded-2xl border px-3 py-2 text-xs font-semibold"
+                      :class="signalDraft[item.key] === choice.value ? 'border-primary-200 bg-primary-50 text-primary-700' : 'border-slate-200 bg-white text-slate-600'"
+                      @click="signalDraft[item.key] = choice.value"
+                    >
+                      {{ choice.label }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </transition>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
-import type { LeadOutcome, NextBestAction } from "@solar/contracts";
+import type { LeadOutcome, NextBestAction, HomeownerConfirmationState, PropertyVisualSignal, ConversationInsight } from "@solar/contracts";
 import MobileHeader from "../components/MobileHeader.vue";
 import EmptyState from "../components/EmptyState.vue";
 import LoadingCard from "../components/LoadingCard.vue";
@@ -244,7 +332,7 @@ import NextBestActionCard from "../components/NextBestAction.vue";
 import { useLeadStore } from "../stores/lead.store";
 import { useLeadActions } from "../composables/useLeadActions";
 import { buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl } from "../services/imagery";
-import { getCapabilities } from "../services/api";
+import { getCapabilities, savePropertyVisualSignals } from "../services/api";
 
 const route = useRoute();
 const router = useRouter();
@@ -254,7 +342,19 @@ const { updateOutcome } = useLeadActions();
 
 const activeTab = ref<"SATELLITE" | "STREET" | "DETAILS">("SATELLITE");
 const savingOutcome = ref(false);
+const savingSignals = ref(false);
+const signalsSheetOpen = ref(false);
 const capabilities = ref<{ imagery: { satellite: boolean; streetView: boolean } } | null>(null);
+const confirmationChoices = [
+  { label: "Yes", value: "YES" },
+  { label: "No", value: "NO" },
+  { label: "Unknown", value: "UNKNOWN" },
+] as const;
+const signalDraft = reactive<HomeownerConfirmationState>({
+  poolHeated: "UNKNOWN",
+  highSummerBill: "UNKNOWN",
+  poolEquipmentIncreasesUsage: "UNKNOWN",
+});
 
 type PropertyDetailTabKey = "SATELLITE" | "STREET" | "DETAILS";
 
@@ -301,6 +401,14 @@ const locationMatchLabel = computed(() => {
   const meters = detail.value?.locationVerification?.distanceMeters;
   return meters == null ? "Unknown" : `${meters} m`;
 });
+const conversationInsights = computed<ConversationInsight[]>(() => detail.value?.conversationInsights ?? []);
+const signalChips = computed<string[]>(() => (detail.value?.visualSignals ?? []).filter((signal) => signal.status === "DETECTED").map(formatVisualSignalLabel));
+const compactSignalLabel = computed(() => signalChips.value[0] ?? null);
+const confirmationRows = computed(() => [
+  { key: "poolHeated" as const, label: "Pool heated?" },
+  { key: "highSummerBill" as const, label: "High summer bill?" },
+  { key: "poolEquipmentIncreasesUsage" as const, label: "Pool equipment noticeably increases usage?" },
+]);
 const nextBestAction = computed<NextBestAction>(() => {
   if (!detail.value) {
     return { code: "NO_ACTION", label: "No action", reason: "Property details are not loaded.", priority: "LOW", tone: "ops" };
@@ -331,6 +439,36 @@ async function loadCapabilities() {
   capabilities.value = await getCapabilities();
   if (!capabilities.value?.imagery.streetView && activeTab.value === "STREET") {
     activeTab.value = "SATELLITE";
+  }
+}
+
+function openSignalsSheet() {
+  const confirmations = detail.value?.homeownerConfirmations ?? {
+    poolHeated: "UNKNOWN",
+    highSummerBill: "UNKNOWN",
+    poolEquipmentIncreasesUsage: "UNKNOWN",
+  };
+  signalDraft.poolHeated = confirmations.poolHeated;
+  signalDraft.highSummerBill = confirmations.highSummerBill;
+  signalDraft.poolEquipmentIncreasesUsage = confirmations.poolEquipmentIncreasesUsage;
+  signalsSheetOpen.value = true;
+}
+
+function closeSignalsSheet() {
+  signalsSheetOpen.value = false;
+}
+
+async function saveSignals() {
+  if (!detail.value) return;
+  savingSignals.value = true;
+  try {
+    const updated = await savePropertyVisualSignals(detail.value.property.id, signalDraft);
+    if (updated) {
+      leadDetail.value = updated;
+      closeSignalsSheet();
+    }
+  } finally {
+    savingSignals.value = false;
   }
 }
 
@@ -475,5 +613,28 @@ function formatSignalValue(value: string | number | boolean | null) {
     return value ? "Yes" : "No";
   }
   return value ?? "";
+}
+
+function formatVisualSignalLabel(signal: PropertyVisualSignal) {
+  switch (signal.type) {
+    case "POOL":
+      return signal.origin === "HOMEOWNER_CONFIRMED" ? "🏊 Pool confirmed" : "🏊 Pool detected";
+    case "LARGE_ROOF":
+      return "📐 Large roof";
+    case "EXISTING_SOLAR":
+      return "☀️ Existing solar";
+    case "LOW_SHADE":
+      return "🌤 Low shade";
+    case "HEAVY_SHADE":
+      return "🌥 Heavy shade";
+    case "DETACHED_GARAGE":
+      return "🏠 Detached garage";
+    case "LARGE_DRIVEWAY":
+      return "🛣 Large driveway";
+    case "LARGE_LOT":
+      return "🌿 Large lot";
+    default:
+      return "Observed signal";
+  }
 }
 </script>

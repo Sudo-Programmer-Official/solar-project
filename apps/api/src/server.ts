@@ -18,6 +18,7 @@ import {
   resolveLocationQuery,
   resolveReverseLocationQuery,
   updateLeadOutcome,
+  updatePropertyVisualSignals,
 } from "./store";
 import {
   getMarketArea,
@@ -446,9 +447,29 @@ export function createServer(repository?: SolarRepository, options: CreateServer
       if (req.method === "POST" && /\/api\/v1\/properties\/[^/]+\/interactions$/.test(url.pathname)) {
         const propertyId = url.pathname.split("/")[4];
         const body = await readJson(req);
-        const outcome = typeof body?.outcome === "string" ? body.outcome : "UNTOUCHED";
+        const outcome = typeof body?.outcome === "string" ? body.outcome : "NEW";
         const notes = typeof body?.notes === "string" && body.notes.trim().length > 0 ? body.notes.trim() : null;
         const updated = await updateLeadOutcome(propertyId, outcome, notes, repository);
+        if (!updated) {
+          sendJson(res, 404, { error: "Property not found" }, corsHeaders);
+          return;
+        }
+        sendJson(res, 200, updated, corsHeaders);
+        return;
+      }
+
+      if (req.method === "POST" && /\/api\/v1\/properties\/[^/]+\/visual-signals$/.test(url.pathname)) {
+        const propertyId = url.pathname.split("/")[4];
+        const body = await readJson(req);
+        const updated = await updatePropertyVisualSignals(
+          propertyId,
+          {
+            poolHeated: normalizeConfirmationAnswer(body?.poolHeated),
+            highSummerBill: normalizeConfirmationAnswer(body?.highSummerBill),
+            poolEquipmentIncreasesUsage: normalizeConfirmationAnswer(body?.poolEquipmentIncreasesUsage),
+          },
+          repository,
+        );
         if (!updated) {
           sendJson(res, 404, { error: "Property not found" }, corsHeaders);
           return;
@@ -519,6 +540,17 @@ export function createServer(repository?: SolarRepository, options: CreateServer
 function sendJson(res: http.ServerResponse, status: number, body: unknown, extraHeaders: Record<string, string> = {}): void {
   res.writeHead(status, { ...jsonHeaders, ...extraHeaders });
   res.end(JSON.stringify(body, null, 2));
+}
+
+function normalizeConfirmationAnswer(value: unknown): "YES" | "NO" | "UNKNOWN" | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "YES" || normalized === "NO" || normalized === "UNKNOWN") {
+    return normalized;
+  }
+  return undefined;
 }
 
 function readJson(req: http.IncomingMessage): Promise<any> {

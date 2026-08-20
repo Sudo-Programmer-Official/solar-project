@@ -234,13 +234,22 @@ export interface PropertySignal {
     | "EV_CHARGER_CONFIRMED"
     | "LARGE_HOME"
     | "LARGE_ROOF"
+    | "DETACHED_GARAGE"
+    | "LARGE_DRIVEWAY"
+    | "HEAVY_SHADE"
+    | "LOW_SHADE"
+    | "LARGE_LOT"
     | "RECENT_ROOF_PERMIT"
     | "EXISTING_SOLAR"
     | "HIGH_USAGE_CONFIRMED"
     | "HIGH_USAGE_ESTIMATED"
+    | "POOL_HEATED_CONFIRMED"
+    | "HIGH_SUMMER_BILL_CONFIRMED"
+    | "POOL_EQUIPMENT_USAGE_CONFIRMED"
     | "OTHER";
   source:
     | "GOOGLE_SOLAR"
+    | "SATELLITE"
     | "PERMIT"
     | "FIELD_REP"
     | "HOMEOWNER"
@@ -251,6 +260,39 @@ export interface PropertySignal {
   confidence: number;
   observedAt: string;
   expiresAt?: string | null;
+}
+
+export interface PropertyVisualSignal {
+  type:
+    | "POOL"
+    | "LARGE_ROOF"
+    | "DETACHED_GARAGE"
+    | "LARGE_DRIVEWAY"
+    | "HEAVY_SHADE"
+    | "LOW_SHADE"
+    | "EXISTING_SOLAR"
+    | "LARGE_LOT"
+    | "OTHER";
+  status: "DETECTED" | "NOT_DETECTED" | "UNKNOWN";
+  confidence: number;
+  source: "SATELLITE" | "SOLAR_API" | "PROPERTY_DATA" | "MANUAL";
+  origin: "OBSERVED" | "MODELED" | "HOMEOWNER_CONFIRMED";
+  observedAt?: string | null;
+}
+
+export interface ConversationInsight {
+  title: string;
+  reason: string;
+  suggestedQuestion: string;
+  verified: boolean;
+}
+
+export type HomeownerConfirmationAnswer = "YES" | "NO" | "UNKNOWN";
+
+export interface HomeownerConfirmationState {
+  poolHeated: HomeownerConfirmationAnswer;
+  highSummerBill: HomeownerConfirmationAnswer;
+  poolEquipmentIncreasesUsage: HomeownerConfirmationAnswer;
 }
 
 export interface OpportunitySignal {
@@ -302,7 +344,12 @@ export interface LeadOutcome {
   propertyId: string;
   repId?: string | null;
   outcome:
+    | "NEW"
     | "UNTOUCHED"
+    | "SAVED"
+    | "SKIPPED"
+    | "REVISIT"
+    | "KNOCKED"
     | "NOT_HOME"
     | "CONVERSATION"
     | "NOT_INTERESTED"
@@ -603,6 +650,10 @@ export interface DiscoveryScanFilters {
   minimumSystemKw?: number | null;
   recentRoofPermit?: boolean;
   noDetectedSolar?: boolean;
+  poolDetected?: boolean;
+  largeRoof?: boolean;
+  lowShade?: boolean;
+  largeLot?: boolean;
   largeProperty?: boolean;
   highValueArea?: boolean;
   revisit?: boolean;
@@ -820,6 +871,9 @@ export interface TodayLeadCard {
   reasons: string[];
   signals: string[];
   opportunitySignals?: OpportunitySignal[];
+  visualSignals?: PropertyVisualSignal[];
+  conversationInsights?: ConversationInsight[];
+  homeownerConfirmations?: HomeownerConfirmationState | null;
   badges: LeadSignalBadge[];
   verificationNeeded: string[];
   outcome: LeadOutcome["outcome"];

@@ -24,6 +24,9 @@ import type {
   MarketAreaDetail,
   MarketEventsResponse,
   MarketHotspotsResponse,
+  ConversationInsight,
+  HomeownerConfirmationState,
+  PropertyVisualSignal,
 } from "@solar/contracts";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
@@ -80,6 +83,9 @@ export interface PropertyDetailPayload {
     confidence: number;
     valueJson: unknown;
   }>;
+  visualSignals: PropertyVisualSignal[];
+  conversationInsights: ConversationInsight[];
+  homeownerConfirmations: HomeownerConfirmationState;
   opportunitySignals: OpportunitySignal[];
   usageProfile: {
     annualUsageKwh?: number | null;
@@ -365,5 +371,16 @@ export async function updateLeadOutcome(propertyId: string, outcome: LeadOutcome
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ outcome, notes }),
+  });
+}
+
+export async function savePropertyVisualSignals(
+  propertyId: string,
+  body: HomeownerConfirmationState,
+): Promise<PropertyDetailPayload | null> {
+  return requestJson<PropertyDetailPayload>(`/api/v1/properties/${encodeURIComponent(propertyId)}/visual-signals`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
 }

@@ -7,15 +7,17 @@ import {
   createRoute,
   getDiscoveryScanResultsPage,
   getDealBrief,
+  getPropertyDetail,
   getRevenueCommandCenter,
   getRouteNext,
   getTodayDashboard,
   scanDiscovery,
   updateLeadOutcome,
+  updatePropertyVisualSignals,
 } from "./store";
 import { GoogleMapsGeocoder } from "../../../packages/geospatial/src/google-geocoder";
 import { GoogleSolarDataProvider } from "../../../packages/solar-api/src/providers/google-solar.provider";
-import type { RoofSegment } from "../../../packages/contracts/src/index";
+import type { PropertySignal, RoofSegment } from "../../../packages/contracts/src/index";
 
 class RecordingRepository extends InMemorySolarRepository {
   public readonly roofSegmentsByAssessment = new Map<string, RoofSegment[]>();
@@ -205,6 +207,201 @@ test("analyzeProperty reduces confidence when roof and imagery inputs are missin
   assert.equal(result.scoreBreakdown.confidence < 100, true);
   assert.equal(result.audit.warnings.includes("MISSING_IMAGERY_DATE"), true);
   assert.equal(result.audit.warnings.includes("ROOF_SEGMENTS_UNAVAILABLE"), true);
+});
+
+test("property detail surfaces pool signals, prompts, and homeowner confirmations", async () => {
+  const repository = new InMemorySolarRepository();
+  const geocoder = new GoogleMapsGeocoder({
+    apiKey: "test-key",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          status: "OK",
+          results: [
+            {
+              formatted_address: "512 Poolside Dr, Demo, PA 00000, USA",
+              place_id: "place-pool",
+              geometry: {
+                location: { lat: 40.4, lng: -79.4 },
+                location_type: "ROOFTOP",
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+  });
+  const solarProvider = new GoogleSolarDataProvider({
+    apiKey: "test-key",
+    fetchImpl: async () =>
+      new Response(JSON.stringify(fixture), { status: 200 }),
+  });
+
+  const analyzed = await analyzeProperty(
+    {
+      address: "512 Poolside Dr, Demo, PA",
+      municipality: "Demo",
+      county: "Demo",
+      state: "PA",
+      postalCode: "00000",
+    },
+    repository,
+    { geocoder, solarProvider },
+  );
+
+  const propertySignal: PropertySignal = {
+    id: "signal-pool",
+    propertyId: analyzed.property.id,
+    signalType: "POOL_VISIBLE",
+    source: "FIELD_REP",
+    valueJson: { observed: true },
+    confidence: 0.9,
+    observedAt: new Date().toISOString(),
+    expiresAt: null,
+  };
+  await repository.replacePropertySignals(analyzed.property.id, [propertySignal]);
+
+  const withPool = await getPropertyDetail(analyzed.property.id, repository);
+  assert.equal(withPool?.visualSignals.some((signal) => signal.type === "POOL" && signal.status === "DETECTED"), true);
+  assert.equal(withPool?.conversationInsights.some((insight) => insight.title === "Ask about pool usage"), true);
+  assert.equal(withPool?.conversationInsights.some((insight) => insight.verified), false);
+
+  const updated = await updatePropertyVisualSignals(
+    analyzed.property.id,
+    {
+      poolHeated: "YES",
+      highSummerBill: "NO",
+      poolEquipmentIncreasesUsage: "UNKNOWN",
+    },
+    repository,
+  );
+
+  assert.equal(updated?.homeownerConfirmations.poolHeated, "YES");
+  assert.equal(updated?.homeownerConfirmations.highSummerBill, "NO");
+  assert.equal(updated?.conversationInsights.some((insight) => insight.verified), true);
+
+  const stored = await getPropertyDetail(analyzed.property.id, repository);
+  assert.equal(stored?.homeownerConfirmations.poolHeated, "YES");
+  assert.equal(stored?.visualSignals.some((signal) => signal.type === "POOL" && signal.origin === "HOMEOWNER_CONFIRMED"), true);
+});
+
+test("discovery pool filter narrows to detected pool properties", async () => {
+  const repository = new InMemorySolarRepository();
+  const geocoder = new GoogleMapsGeocoder({
+    apiKey: "test-key",
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          status: "OK",
+          results: [
+            {
+              formatted_address: "100 Pool Ave, Demo, PA 00000, USA",
+              place_id: "place-pool-a",
+              geometry: {
+                location: { lat: 40.41, lng: -79.41 },
+                location_type: "ROOFTOP",
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+  });
+  const solarProvider = new GoogleSolarDataProvider({
+    apiKey: "test-key",
+    fetchImpl: async () =>
+      new Response(JSON.stringify(fixture), { status: 200 }),
+  });
+
+  const poolLead = await analyzeProperty(
+    {
+      address: "100 Pool Ave, Demo, PA",
+      municipality: "Demo",
+      county: "Demo",
+      state: "PA",
+      postalCode: "00000",
+    },
+    repository,
+    { geocoder, solarProvider },
+  );
+  await repository.replacePropertySignals(poolLead.property.id, [
+    {
+      id: "pool-signal",
+      propertyId: poolLead.property.id,
+      signalType: "POOL_VISIBLE",
+      source: "FIELD_REP",
+      valueJson: { observed: true },
+      confidence: 0.95,
+      observedAt: new Date().toISOString(),
+      expiresAt: null,
+    },
+  ]);
+
+  const noPoolLead = await analyzeProperty(
+    {
+      address: "101 Plain Ave, Demo, PA",
+      municipality: "Demo",
+      county: "Demo",
+      state: "PA",
+      postalCode: "00001",
+    },
+    repository,
+    {
+      geocoder: new GoogleMapsGeocoder({
+        apiKey: "test-key",
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              status: "OK",
+              results: [
+                {
+                  formatted_address: "101 Plain Ave, Demo, PA 00001, USA",
+                  place_id: "place-pool-b",
+                  geometry: {
+                    location: { lat: 40.4105, lng: -79.4105 },
+                    location_type: "ROOFTOP",
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      }),
+      solarProvider,
+    },
+  );
+
+  const unfiltered = await scanDiscovery(
+    {
+      latitude: 40.41,
+      longitude: -79.41,
+      radiusMiles: 5,
+      filters: {},
+      limit: 25,
+      maxGoogleSolarCalls: 0,
+    },
+    repository,
+    { geocoder, solarProvider },
+  );
+  const poolOnly = await scanDiscovery(
+    {
+      latitude: 40.41,
+      longitude: -79.41,
+      radiusMiles: 5,
+      filters: { poolDetected: true },
+      limit: 25,
+      maxGoogleSolarCalls: 0,
+    },
+    repository,
+    { geocoder, solarProvider },
+  );
+
+  assert.equal(unfiltered.results.length >= 2, true);
+  assert.equal(poolOnly.results.length, 1);
+  assert.equal(poolOnly.results[0]?.propertyId, poolLead.property.id);
+  assert.equal(poolOnly.results[0]?.visualSignals?.some((signal) => signal.type === "POOL" && signal.status === "DETECTED"), true);
+  assert.equal(poolOnly.results[0]?.visualSignals?.every((signal) => signal.type !== "POOL" || signal.status === "DETECTED"), true);
+  assert.equal(noPoolLead.property.id !== poolOnly.results[0]?.propertyId, true);
 });
 
 test("lead outcomes persist across dashboard refreshes", async () => {

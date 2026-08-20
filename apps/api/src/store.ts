@@ -69,6 +69,9 @@ import type {
   RevenueCommandCenter,
   TodayDashboard,
   TodayLeadCard,
+  ConversationInsight,
+  HomeownerConfirmationState,
+  PropertyVisualSignal,
   UsageProfile,
 } from "../../../packages/contracts/src/index";
 import { calculateWhaleScore, type WhaleScoreResult } from "../../../packages/scoring/src/index";
@@ -125,6 +128,9 @@ export interface AnalyzeResult {
   whaleScore: WhaleScoreResult;
   signals: PropertySignal[];
   opportunitySignals: OpportunitySignal[];
+  visualSignals: PropertyVisualSignal[];
+  conversationInsights: ConversationInsight[];
+  homeownerConfirmations: HomeownerConfirmationState;
   usageProfile: UsageProfile;
   permits: PermitRecord[];
   leadOutcome: LeadOutcome;
@@ -197,6 +203,7 @@ export async function analyzeProperty(
   const estimatedEnergyNeedKw = estimateEnergyNeedKw(confirmedAnnualUsageKwh);
   const whaleScore = buildWhaleScore(propertySignals, solarAssessment, usageProfile);
   const permitList = await buildPermits(property, repository);
+  const homeownerConfirmations = buildHomeownerConfirmationState(propertySignals);
   const opportunityAssessment = await buildOpportunityAssessment(
     property,
     solarAssessment,
@@ -215,6 +222,8 @@ export async function analyzeProperty(
     warnings,
   });
   const locationVerification = buildLocationVerificationSummary(property, audit, env.locationMatchThresholdMeters ?? 10);
+  const visualSignals = buildPropertyVisualSignals(solarAssessment, propertySignals, homeownerConfirmations);
+  const conversationInsights = buildConversationInsights(visualSignals, homeownerConfirmations);
   const analysisBase: AnalyzeResult = {
     property,
     solar,
@@ -233,6 +242,9 @@ export async function analyzeProperty(
     whaleScore,
     signals: propertySignals,
     opportunitySignals: [],
+    visualSignals,
+    conversationInsights,
+    homeownerConfirmations,
     usageProfile,
     permits: permitList,
     leadOutcome,
@@ -375,6 +387,7 @@ async function hydrateStoredAnalysis(
   const estimatedEnergyNeedKw = estimateEnergyNeedKw(confirmedAnnualUsageKwh);
   const whaleScore = buildWhaleScore(propertySignals, solarAssessment, usageProfile);
   const permitList = await buildPermits(property, repository);
+  const homeownerConfirmations = buildHomeownerConfirmationState(propertySignals);
   const opportunityAssessment = await buildOpportunityAssessment(
     property,
     solarAssessment,
@@ -398,6 +411,8 @@ async function hydrateStoredAnalysis(
     warnings,
   });
   const locationVerification = buildLocationVerificationSummary(property, audit, env.locationMatchThresholdMeters ?? 10);
+  const visualSignals = buildPropertyVisualSignals(solarAssessment, propertySignals, homeownerConfirmations);
+  const conversationInsights = buildConversationInsights(visualSignals, homeownerConfirmations);
   const analysisBase: AnalyzeResult = {
     property,
     solar,
@@ -416,6 +431,9 @@ async function hydrateStoredAnalysis(
     whaleScore,
     signals: propertySignals,
     opportunitySignals: [],
+    visualSignals,
+    conversationInsights,
+    homeownerConfirmations,
     usageProfile,
     permits: permitList,
     leadOutcome,
@@ -473,7 +491,7 @@ export async function getTodayDashboard(
   const summary = {
     priorityLeads: combinedLeads.filter((lead) => lead.opportunityScore >= 70).length,
     whaleCandidates: combinedLeads.filter((lead) => lead.whaleScore >= 60).length,
-    revisits: combinedLeads.filter((lead) => lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
+    revisits: combinedLeads.filter((lead) => lead.outcome === "REVISIT" || lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
     needsBill: combinedLeads.filter((lead) => lead.verificationNeeded.some((item) => item.toLowerCase().includes("bill"))).length,
     total: combinedLeads.length,
   };
@@ -510,6 +528,60 @@ export async function updateLeadOutcome(
     notes,
     createdAt: new Date().toISOString(),
   });
+}
+
+export interface UpdatePropertyVisualSignalsInput {
+  poolHeated?: "YES" | "NO" | "UNKNOWN";
+  highSummerBill?: "YES" | "NO" | "UNKNOWN";
+  poolEquipmentIncreasesUsage?: "YES" | "NO" | "UNKNOWN";
+}
+
+export async function updatePropertyVisualSignals(
+  propertyId: string,
+  input: UpdatePropertyVisualSignalsInput,
+  repository: SolarRepository = defaultRepository,
+): Promise<AnalyzeResult | null> {
+  const property = await repository.getPropertyById(propertyId);
+  if (!property) {
+    return null;
+  }
+
+  const existingSignals = await repository.listPropertySignals(property.id);
+  const preserved = existingSignals.filter((signal) => !HOMEOWNER_CONFIRMATION_SIGNAL_TYPES.has(signal.signalType));
+  const confirmations: PropertySignal[] = [
+    buildHomeownerSignal(property.id, "POOL_HEATED_CONFIRMED", input.poolHeated, existingSignals),
+    buildHomeownerSignal(property.id, "HIGH_SUMMER_BILL_CONFIRMED", input.highSummerBill, existingSignals),
+    buildHomeownerSignal(property.id, "POOL_EQUIPMENT_USAGE_CONFIRMED", input.poolEquipmentIncreasesUsage, existingSignals),
+  ].filter((signal): signal is PropertySignal => signal != null);
+  await repository.replacePropertySignals(property.id, [...preserved, ...confirmations]);
+  return getPropertyDetail(property.id, repository);
+}
+
+const HOMEOWNER_CONFIRMATION_SIGNAL_TYPES = new Set<PropertySignal["signalType"]>([
+  "POOL_HEATED_CONFIRMED",
+  "HIGH_SUMMER_BILL_CONFIRMED",
+  "POOL_EQUIPMENT_USAGE_CONFIRMED",
+]);
+
+function buildHomeownerSignal(
+  propertyId: string,
+  signalType: PropertySignal["signalType"],
+  answer?: "YES" | "NO" | "UNKNOWN",
+  existingSignals: PropertySignal[] = [],
+): PropertySignal | null {
+  if (answer == null) {
+    return existingSignals.find((signal) => signal.signalType === signalType) ?? null;
+  }
+  return {
+    id: stableId(`${propertyId}:signal:${signalType.toLowerCase()}`),
+    propertyId,
+    signalType,
+    source: "HOMEOWNER",
+    valueJson: { answer },
+    confidence: answer === "UNKNOWN" ? 0.5 : 1,
+    observedAt: new Date().toISOString(),
+    expiresAt: null,
+  };
 }
 
 export async function resolveLocationQuery(
@@ -1322,7 +1394,7 @@ async function buildDiscoveryCandidates(
       outsideRadius += 1;
       continue;
     }
-    const candidate = buildDiscoveryCandidateRecordLite(property, distanceMiles, markets);
+    const candidate = await buildDiscoveryCandidateRecord(property, distanceMiles, markets, repository);
     if (!isResidentialPropertyUse(candidate.propertyUse)) {
       continue;
     }
@@ -2133,7 +2205,15 @@ function mapSignalCategory(signalType: PropertySignal["signalType"]): Opportunit
     case "EV_CHARGER_CONFIRMED":
     case "LARGE_HOME":
     case "LARGE_ROOF":
+    case "DETACHED_GARAGE":
+    case "LARGE_DRIVEWAY":
+    case "HEAVY_SHADE":
+    case "LOW_SHADE":
+    case "LARGE_LOT":
     case "EXISTING_SOLAR":
+    case "POOL_HEATED_CONFIRMED":
+    case "HIGH_SUMMER_BILL_CONFIRMED":
+    case "POOL_EQUIPMENT_USAGE_CONFIRMED":
       return "PROPERTY";
     case "RECENT_ROOF_PERMIT":
       return "PERMIT";
@@ -2150,10 +2230,19 @@ function mapSignalImpact(signalType: PropertySignal["signalType"]): number {
     case "POOL_VISIBLE":
     case "EV_CONFIRMED":
     case "EV_CHARGER_CONFIRMED":
+    case "POOL_HEATED_CONFIRMED":
+    case "HIGH_SUMMER_BILL_CONFIRMED":
+    case "POOL_EQUIPMENT_USAGE_CONFIRMED":
       return 18;
     case "LARGE_HOME":
     case "LARGE_ROOF":
+    case "LARGE_DRIVEWAY":
+    case "LARGE_LOT":
       return 26;
+    case "DETACHED_GARAGE":
+    case "HEAVY_SHADE":
+    case "LOW_SHADE":
+      return 12;
     case "RECENT_ROOF_PERMIT":
       return 22;
     case "EXISTING_SOLAR":
@@ -2271,6 +2360,10 @@ function applyDiscoveryFilters(
   const highPriority = filters.highPriority ?? false;
   const recentRoofPermit = filters.recentRoofPermit ?? filters.recentRoofPermits ?? false;
   const noDetectedSolar = filters.noDetectedSolar ?? filters.noDetectedExistingSolar ?? false;
+  const poolDetected = filters.poolDetected ?? false;
+  const largeRoof = filters.largeRoof ?? false;
+  const lowShade = filters.lowShade ?? false;
+  const largeLot = filters.largeLot ?? false;
   const largeProperty = filters.largeProperty ?? filters.largeProperties ?? false;
   const highValueArea = filters.highValueArea ?? filters.highValueAreas ?? false;
   const revisit = filters.revisit ?? filters.revisits ?? false;
@@ -2284,16 +2377,42 @@ function applyDiscoveryFilters(
     if (largeProperty && !candidate.signals.some((signal) => signal === "Large roof" || signal === "Large property")) {
       return false;
     }
+    if (poolDetected && !candidateHasDetectedVisualSignal(candidate, "POOL", ["Pool signal", "Pool detected"])) {
+      return false;
+    }
+    if (
+      largeRoof &&
+      !(
+        (candidate.maxRoofSolarCapacityKw != null && candidate.maxRoofSolarCapacityKw >= 15) ||
+        candidateHasDetectedVisualSignal(candidate, "LARGE_ROOF", ["Large roof"])
+      )
+    ) {
+      return false;
+    }
+    if (lowShade && !candidateHasDetectedVisualSignal(candidate, "LOW_SHADE", ["Low shade"])) {
+      return false;
+    }
+    if (largeLot && !candidateHasDetectedVisualSignal(candidate, "LARGE_LOT", ["Large lot", "Large property"])) {
+      return false;
+    }
     if (recentRoofPermit && !candidate.signals.includes("Recent roof permit")) {
       return false;
     }
     if (highValueArea && candidate.market?.medianHomeValueBand == null) {
       return false;
     }
-    if (noDetectedSolar && candidate.signals.includes("Existing solar")) {
+    if (
+      noDetectedSolar &&
+      (candidate.freshAnalysis?.solarAssessment.existingSolarStatus !== "NOT_DETECTED" || candidate.signals.includes("Existing solar"))
+    ) {
       return false;
     }
-    if (revisit && candidate.leadOutcome?.outcome !== "NOT_HOME" && candidate.leadOutcome?.outcome !== "BILL_REQUESTED") {
+    if (
+      revisit &&
+      candidate.leadOutcome?.outcome !== "REVISIT" &&
+      candidate.leadOutcome?.outcome !== "NOT_HOME" &&
+      candidate.leadOutcome?.outcome !== "BILL_REQUESTED"
+    ) {
       return false;
     }
     if (filters.lowSolarSaturation && candidate.market?.solarSaturation !== "LOW") {
@@ -2301,6 +2420,17 @@ function applyDiscoveryFilters(
     }
     return true;
   });
+}
+
+function candidateHasDetectedVisualSignal(
+  candidate: DiscoveryCandidateRecord,
+  type: PropertyVisualSignal["type"],
+  fallbackLabels: string[] = [],
+): boolean {
+  if (candidate.freshAnalysis?.visualSignals.some((signal) => signal.type === type && signal.status === "DETECTED")) {
+    return true;
+  }
+  return fallbackLabels.some((label) => candidate.signals.includes(label));
 }
 
 function getMinimumSystemKw(filters: DiscoveryScanFilters): number | null {
@@ -2651,7 +2781,7 @@ async function getCompletedRoutePropertyIds(propertyIds: string[], repository: S
   const completed: string[] = [];
   for (const propertyId of propertyIds) {
     const outcome = await repository.getLeadOutcomeByPropertyId(propertyId);
-    if (outcome && outcome.outcome !== "UNTOUCHED") {
+    if (outcome && !isUnreviewedOutcome(outcome.outcome)) {
       completed.push(propertyId);
     }
   }
@@ -3077,7 +3207,9 @@ async function buildSignals(
   repository: SolarRepository,
 ): Promise<PropertySignal[]> {
   const created: PropertySignal[] = [];
-  if ((solar.maxArrayPanelsCount ?? 0) >= 20) {
+  const existingSignals = await repository.listPropertySignals(property.id);
+  const preserved = existingSignals.filter((signal) => signal.source !== "GOOGLE_SOLAR" && signal.source !== "SATELLITE" && signal.source !== "MODEL");
+  if ((solarAssessment.maxArrayPanelsCount ?? 0) >= 20) {
     created.push({
       id: stableId(`${property.id}:signal:roof`),
       propertyId: property.id,
@@ -3108,7 +3240,7 @@ async function buildSignals(
       expiresAt: null,
     });
   }
-  return repository.replacePropertySignals(property.id, created);
+  return repository.replacePropertySignals(property.id, [...preserved, ...created]);
 }
 
 async function buildUsageProfile(
@@ -3148,6 +3280,188 @@ function buildWhaleScore(propertySignals: PropertySignal[], solarAssessment: Sol
     confirmedEvChargerSignal: false,
     solarProductionPotential: solarAssessment.estimatedAnnualProductionKwh ? solarAssessment.estimatedAnnualProductionKwh / 20000 : null,
   });
+}
+
+function buildHomeownerConfirmationState(propertySignals: PropertySignal[]): HomeownerConfirmationState {
+  return {
+    poolHeated: confirmationFromSignals(propertySignals, "POOL_HEATED_CONFIRMED"),
+    highSummerBill: confirmationFromSignals(propertySignals, "HIGH_SUMMER_BILL_CONFIRMED"),
+    poolEquipmentIncreasesUsage: confirmationFromSignals(propertySignals, "POOL_EQUIPMENT_USAGE_CONFIRMED"),
+  };
+}
+
+function confirmationFromSignals(propertySignals: PropertySignal[], signalType: PropertySignal["signalType"]): "YES" | "NO" | "UNKNOWN" {
+  const signal = [...propertySignals].reverse().find((item) => item.signalType === signalType);
+  if (!signal) {
+    return "UNKNOWN";
+  }
+  if (isRecord(signal.valueJson) && typeof signal.valueJson.answer === "string") {
+    const answer = signal.valueJson.answer.toUpperCase();
+    if (answer === "YES" || answer === "NO" || answer === "UNKNOWN") {
+      return answer;
+    }
+  }
+  return "UNKNOWN";
+}
+
+function buildPropertyVisualSignals(
+  solarAssessment: SolarAssessment,
+  propertySignals: PropertySignal[],
+  homeownerConfirmations: HomeownerConfirmationState,
+): PropertyVisualSignal[] {
+  const observedAt = new Date().toISOString();
+  const signals: PropertyVisualSignal[] = [];
+
+  if (propertySignals.some((signal) => signal.signalType === "POOL_VISIBLE" && signal.source !== "HOMEOWNER")) {
+    signals.push({
+      type: "POOL",
+      status: "DETECTED",
+      confidence: highestSignalConfidence(propertySignals, "POOL_VISIBLE", 0.78),
+      source: "SATELLITE",
+      origin: "OBSERVED",
+      observedAt,
+    });
+  }
+
+  if ((solarAssessment.maxArrayPanelsCount ?? 0) >= 20) {
+    signals.push({
+      type: "LARGE_ROOF",
+      status: "DETECTED",
+      confidence: 0.9,
+      source: "SOLAR_API",
+      origin: "MODELED",
+      observedAt,
+    });
+  }
+
+  if (solarAssessment.existingSolarStatus === "DETECTED") {
+    signals.push({
+      type: "EXISTING_SOLAR",
+      status: "DETECTED",
+      confidence: solarAssessment.existingSolarConfidence ?? 0.8,
+      source: "SOLAR_API",
+      origin: "OBSERVED",
+      observedAt,
+    });
+  }
+
+  if (solarAssessment.shadeScore != null) {
+    if (solarAssessment.shadeScore >= 70) {
+      signals.push({
+        type: "LOW_SHADE",
+        status: "DETECTED",
+        confidence: Math.min(1, solarAssessment.shadeScore / 100),
+        source: "SOLAR_API",
+        origin: "MODELED",
+        observedAt,
+      });
+    } else if (solarAssessment.shadeScore <= 30) {
+      signals.push({
+        type: "HEAVY_SHADE",
+        status: "DETECTED",
+        confidence: Math.min(1, (100 - solarAssessment.shadeScore) / 100),
+        source: "SOLAR_API",
+        origin: "MODELED",
+        observedAt,
+      });
+    }
+  }
+
+  if (homeownerConfirmations.poolHeated !== "UNKNOWN") {
+    signals.push({
+      type: "POOL",
+      status: "DETECTED",
+      confidence: 1,
+      source: "MANUAL",
+      origin: "HOMEOWNER_CONFIRMED",
+      observedAt,
+    });
+  }
+
+  return dedupeVisualSignals(signals);
+}
+
+function dedupeVisualSignals(signals: PropertyVisualSignal[]): PropertyVisualSignal[] {
+  const seen = new Set<string>();
+  const result: PropertyVisualSignal[] = [];
+  for (const signal of signals) {
+    const key = `${signal.type}:${signal.status}:${signal.origin}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(signal);
+  }
+  return result;
+}
+
+function highestSignalConfidence(
+  propertySignals: PropertySignal[],
+  signalType: PropertySignal["signalType"],
+  fallback: number,
+): number {
+  const confidence = propertySignals.filter((signal) => signal.signalType === signalType).reduce((max, signal) => Math.max(max, signal.confidence), 0);
+  return confidence > 0 ? confidence : fallback;
+}
+
+function buildConversationInsights(
+  visualSignals: PropertyVisualSignal[],
+  homeownerConfirmations: HomeownerConfirmationState,
+): ConversationInsight[] {
+  const insights: ConversationInsight[] = [];
+  const hasPool = visualSignals.some((signal) => signal.type === "POOL" && signal.status === "DETECTED");
+  const hasLargeRoof = visualSignals.some((signal) => signal.type === "LARGE_ROOF" && signal.status === "DETECTED");
+  const hasShade = visualSignals.some((signal) => (signal.type === "HEAVY_SHADE" || signal.type === "LOW_SHADE") && signal.status === "DETECTED");
+  const hasSolar = visualSignals.some((signal) => signal.type === "EXISTING_SOLAR" && signal.status === "DETECTED");
+
+  if (hasPool) {
+    insights.push({
+      title: "Ask about pool usage",
+      reason: "Pool visible on property imagery.",
+      suggestedQuestion: "I noticed you have a pool. Does your electric bill usually climb during the summer because of the pump or pool equipment?",
+      verified: homeownerConfirmations.poolHeated !== "UNKNOWN",
+    });
+  }
+
+  if (hasLargeRoof) {
+    insights.push({
+      title: "Ask about roof plans",
+      reason: "The roof looks large enough for a meaningful solar layout.",
+      suggestedQuestion: "You have a good amount of roof space here. Has anyone ever run the solar numbers specifically for your home?",
+      verified: false,
+    });
+  }
+
+  if (hasShade) {
+    insights.push({
+      title: "Ask about sun exposure",
+      reason: "Roof shade needs a closer look from imagery and model data.",
+      suggestedQuestion: "Does the roof get good sunlight for most of the day?",
+      verified: false,
+    });
+  }
+
+  if (hasSolar) {
+    insights.push({
+      title: "Ask about existing solar",
+      reason: "Panels appear to already be present on the property.",
+      suggestedQuestion: "It looks like there may already be panels here. Is that system currently active?",
+      verified: false,
+    });
+  }
+
+  if (
+    homeownerConfirmations.poolHeated !== "UNKNOWN" ||
+    homeownerConfirmations.highSummerBill !== "UNKNOWN" ||
+    homeownerConfirmations.poolEquipmentIncreasesUsage !== "UNKNOWN"
+  ) {
+    insights.push({
+      title: "Review homeowner answers",
+      reason: "A homeowner confirmation has been captured.",
+      suggestedQuestion: "Do those notes still match what you shared earlier?",
+      verified: true,
+    });
+  }
+
+  return insights.slice(0, 4);
 }
 
 async function buildPermits(property: Property, repository: SolarRepository): Promise<PermitRecord[]> {
@@ -3237,7 +3551,7 @@ async function buildLeadOutcome(property: Property, repository: SolarRepository)
     id: stableId(`${property.id}:lead`),
     propertyId: property.id,
     repId: null,
-    outcome: "UNTOUCHED",
+    outcome: "NEW",
     notes: null,
     createdAt: new Date().toISOString(),
   };
@@ -3299,6 +3613,9 @@ function mapAnalyzeResultToLeadCard(result: AnalyzeResult, isDemo: boolean): Tod
     reasons,
     signals,
     opportunitySignals: result.opportunitySignals,
+    visualSignals: result.visualSignals,
+    conversationInsights: result.conversationInsights,
+    homeownerConfirmations: result.homeownerConfirmations,
     badges: deriveBadges(result, signals, verificationNeeded),
     verificationNeeded,
     outcome: result.leadOutcome.outcome,
@@ -3313,9 +3630,13 @@ function deriveSignalLabels(result: AnalyzeResult): string[] {
   if ((result.solarAssessment.maxSunshineHoursPerYear ?? 0) >= 1300) labels.add("Strong sunlight");
   if (result.solarAssessment.existingSolarStatus === "DETECTED") labels.add("Existing solar");
   if (result.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED")) labels.add("Recent roof permit");
-  if (result.signals.some((signal) => signal.signalType === "POOL_VISIBLE")) labels.add("Pool signal");
+  if (result.visualSignals.some((signal) => signal.type === "POOL" && signal.status === "DETECTED")) labels.add("Pool detected");
+  if (result.visualSignals.some((signal) => signal.type === "LARGE_ROOF" && signal.status === "DETECTED")) labels.add("Large roof");
+  if (result.visualSignals.some((signal) => signal.type === "LOW_SHADE" && signal.status === "DETECTED")) labels.add("Low shade");
+  if (result.visualSignals.some((signal) => signal.type === "HEAVY_SHADE" && signal.status === "DETECTED")) labels.add("Heavy shade");
   if (result.signals.some((signal) => signal.signalType === "EV_CONFIRMED" || signal.signalType === "EV_CHARGER_CONFIRMED")) labels.add("EV signal");
   if (result.signals.some((signal) => signal.signalType === "HIGH_USAGE_CONFIRMED" || signal.signalType === "HIGH_USAGE_ESTIMATED")) labels.add("High usage");
+  if (result.signals.some((signal) => signal.signalType === "LARGE_HOME")) labels.add("Large property");
   return [...labels].slice(0, 4);
 }
 
@@ -3474,6 +3795,12 @@ function buildNeighborhoodSeedData(repository: SolarRepository): NeighborhoodMar
 
 function determineDealStage(result: AnalyzeResult): DealStage {
   switch (result.leadOutcome.outcome) {
+    case "SAVED":
+    case "SKIPPED":
+    case "REVISIT":
+    case "KNOCKED":
+    case "NEW":
+    case "UNTOUCHED":
     case "NOT_HOME":
     case "CANCELLED":
       return "RECOVERY";
@@ -3497,6 +3824,10 @@ function determineDealStage(result: AnalyzeResult): DealStage {
       }
       return "RECOVERY";
   }
+}
+
+function isUnreviewedOutcome(outcome: LeadOutcome["outcome"]): boolean {
+  return outcome === "NEW" || outcome === "UNTOUCHED";
 }
 
 function pendingPermitDays(permits: PermitRecord[]): number | null {
@@ -3748,6 +4079,16 @@ function signalLabel(signalType: PropertySignal["signalType"]): string {
       return "Large home";
     case "LARGE_ROOF":
       return "Large roof";
+    case "DETACHED_GARAGE":
+      return "Detached garage";
+    case "LARGE_DRIVEWAY":
+      return "Large driveway";
+    case "HEAVY_SHADE":
+      return "Heavy shade";
+    case "LOW_SHADE":
+      return "Low shade";
+    case "LARGE_LOT":
+      return "Large lot";
     case "RECENT_ROOF_PERMIT":
       return "Recent roof permit";
     case "EXISTING_SOLAR":
@@ -3756,6 +4097,12 @@ function signalLabel(signalType: PropertySignal["signalType"]): string {
       return "High usage confirmed";
     case "HIGH_USAGE_ESTIMATED":
       return "High usage estimated";
+    case "POOL_HEATED_CONFIRMED":
+      return "Pool heated";
+    case "HIGH_SUMMER_BILL_CONFIRMED":
+      return "High summer bill";
+    case "POOL_EQUIPMENT_USAGE_CONFIRMED":
+      return "Pool equipment usage";
     default:
       return "Model signal";
   }

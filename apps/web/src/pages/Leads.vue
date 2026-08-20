@@ -8,10 +8,25 @@
       <p class="mt-1 text-sm text-slate-500">{{ leadCountLabel }}</p>
     </section>
 
+    <section class="mt-4 page-surface p-4">
+      <div class="grid grid-cols-4 gap-2">
+        <button
+          v-for="tab in tabs"
+          :key="tab.key"
+          class="touch-target rounded-2xl border px-3 py-3 text-sm font-semibold transition"
+          :class="activeTab === tab.key ? activeTabClasses : inactiveTabClasses"
+          type="button"
+          @click="activeTab = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
+    </section>
+
     <section class="mt-4 grid gap-4">
       <LoadingCard v-if="loading" />
       <LeadCard
-        v-for="lead in filteredLeads"
+        v-for="lead in tabbedLeads"
         :key="lead.id"
         :lead="lead"
         :selected="selectedIds.has(lead.propertyId ?? lead.id)"
@@ -24,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import type { LeadOutcome } from "@solar/contracts";
@@ -43,6 +58,16 @@ const searchContextStore = useSearchContextStore();
 const { filteredLeads, loading, summary } = storeToRefs(leadStore);
 const { updateOutcome, openDirections } = useLeadActions();
 const selectedIds = computed(() => new Set(hunt.selectedPropertyIds));
+const tabs = [
+  { key: "all", label: "All" },
+  { key: "saved", label: "Saved" },
+  { key: "skipped", label: "Skipped" },
+  { key: "revisit", label: "Revisit" },
+] as const;
+const activeTab = ref<(typeof tabs)[number]["key"]>("all");
+const activeTabClasses = "border-primary-300 bg-primary-50 text-slate-900 shadow-[0_0_0_1px_rgba(34,211,238,0.18)]";
+const inactiveTabClasses = "border-slate-200 bg-white text-slate-700 hover:border-primary-200 hover:bg-slate-50";
+const tabbedLeads = computed(() => filteredLeads.value.filter((lead) => matchesTab(lead, activeTab.value)));
 
 onMounted(async () => {
   if (leadStore.leads.length === 0) {
@@ -59,7 +84,7 @@ watch(
 );
 
 const leadCountLabel = computed(
-  () => `${summary.value?.total ?? filteredLeads.value.length} leads · ${summary.value?.whaleCandidates ?? 0} whales · ${summary.value?.revisits ?? 0} revisits`,
+  () => `${tabbedLeads.value.length} leads · ${summary.value?.whaleCandidates ?? 0} whales · ${summary.value?.revisits ?? 0} revisits`,
 );
 
 function navigate(lead: { propertyId?: string | null; address: string }) {
@@ -82,5 +107,21 @@ async function setOutcome(lead: { propertyId?: string | null; address: string },
 
 function toggleLead(lead: { propertyId?: string | null; address: string }) {
   hunt.selectLead(lead.propertyId ?? encodeURIComponent(lead.address));
+}
+
+function matchesTab(
+  lead: { outcome: string },
+  tab: (typeof tabs)[number]["key"],
+) {
+  if (tab === "all") {
+    return true;
+  }
+  if (tab === "saved") {
+    return lead.outcome === "SAVED";
+  }
+  if (tab === "skipped") {
+    return lead.outcome === "SKIPPED";
+  }
+  return lead.outcome === "REVISIT" || lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED";
 }
 </script>

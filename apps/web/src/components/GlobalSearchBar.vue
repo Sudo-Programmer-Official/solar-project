@@ -139,6 +139,23 @@
           </section>
 
           <section class="grid gap-3">
+            <p class="text-sm font-semibold text-slate-900">Property signals</p>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                v-for="item in propertySignalFilters"
+                :key="item.key"
+                class="touch-target flex min-h-[52px] items-center justify-between rounded-2xl border px-3 py-3 text-sm font-semibold transition"
+                :class="draftFilters[item.key] ? selectedButtonClasses : unselectedButtonClasses"
+                type="button"
+                @click="toggleDraftBooleanFilter(item.key)"
+              >
+                <span>{{ item.label }}</span>
+                <Check v-if="draftFilters[item.key]" class="h-4 w-4 shrink-0 text-primary-500" />
+              </button>
+            </div>
+          </section>
+
+          <section class="grid gap-3">
             <p class="text-sm font-semibold text-slate-900">Signals</p>
             <div class="grid gap-2">
               <button
@@ -203,6 +220,12 @@ const opportunityFilters = [
   { key: "highPriority" as const, label: "High priority" },
   { key: "revisit" as const, label: "Revisit" },
 ] as const;
+const propertySignalFilters = [
+  { key: "poolDetected" as const, label: "Pool" },
+  { key: "largeRoof" as const, label: "Large roof" },
+  { key: "lowShade" as const, label: "Low shade" },
+  { key: "largeLot" as const, label: "Large lot" },
+] as const;
 const signalFilters = [
   { key: "recentRoofPermit" as const, label: "Recent roof permit" },
   { key: "noDetectedSolar" as const, label: "No detected solar" },
@@ -236,12 +259,16 @@ const filterSummary = computed(() => {
   if (searchStore.filters.whaleCandidates) labels.push("Whales");
   if (searchStore.filters.highPriority) labels.push("High Priority");
   if (searchStore.filters.minimumSystemKw != null) labels.push(`${searchStore.filters.minimumSystemKw}+ kW`);
+  if (searchStore.filters.poolDetected) labels.push("Pool");
+  if (searchStore.filters.largeRoof) labels.push("Large roof");
+  if (searchStore.filters.lowShade) labels.push("Low shade");
+  if (searchStore.filters.largeLot) labels.push("Large lot");
   if (searchStore.filters.recentRoofPermit) labels.push("Roof permits");
-  if (searchStore.filters.noDetectedSolar) labels.push("No solar");
+  if (searchStore.filters.noDetectedSolar) labels.push("No detected solar");
   if (searchStore.filters.largeProperty) labels.push("Large properties");
   if (searchStore.filters.highValueArea) labels.push("High-value areas");
   if (searchStore.filters.revisit) labels.push("Revisit");
-  return labels.slice(0, 3);
+  return labels.slice(0, 4);
 });
 const activeFilterCount = computed(() => searchStore.filterCount);
 const activeFilterSummary = computed(() => {
@@ -254,6 +281,10 @@ const draftSummary = computed(() => {
   if (draftFilters.value.whaleCandidates) labels.push("Whales");
   if (draftFilters.value.highPriority) labels.push("High Priority");
   if (draftFilters.value.minimumSystemKw != null) labels.push(`${draftFilters.value.minimumSystemKw}+ kW`);
+  if (draftFilters.value.poolDetected) labels.push("Pool");
+  if (draftFilters.value.largeRoof) labels.push("Large roof");
+  if (draftFilters.value.lowShade) labels.push("Low shade");
+  if (draftFilters.value.largeLot) labels.push("Large lot");
   if (draftFilters.value.recentRoofPermit) labels.push("Recent roof permit");
   if (draftFilters.value.noDetectedSolar) labels.push("No detected solar");
   if (draftFilters.value.largeProperty) labels.push("Large property");
@@ -367,7 +398,9 @@ async function findBestDoors(options: { quiet?: boolean } = {}) {
   }
 }
 
-function booleanFilterActive(key: typeof opportunityFilters[number]["key"] | typeof signalFilters[number]["key"]) {
+type FilterToggleKey = typeof opportunityFilters[number]["key"] | typeof propertySignalFilters[number]["key"] | typeof signalFilters[number]["key"];
+
+function booleanFilterActive(key: FilterToggleKey) {
   return Boolean(searchStore.filters[key]);
 }
 
@@ -388,6 +421,10 @@ function resetDraft() {
     minimumSystemKw: null,
     recentRoofPermit: false,
     noDetectedSolar: false,
+    poolDetected: false,
+    largeRoof: false,
+    lowShade: false,
+    largeLot: false,
     largeProperty: false,
     highValueArea: false,
     revisit: false,
@@ -400,7 +437,7 @@ function applyDraftFilters() {
   void findBestDoors({ quiet: true });
 }
 
-function toggleDraftBooleanFilter(key: typeof opportunityFilters[number]["key"] | typeof signalFilters[number]["key"]) {
+function toggleDraftBooleanFilter(key: FilterToggleKey) {
   draftFilters.value = {
     ...draftFilters.value,
     [key]: !draftFilters.value[key],

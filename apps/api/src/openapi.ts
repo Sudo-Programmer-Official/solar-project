@@ -24,6 +24,7 @@ export const openApiEndpoints = [
   "POST /routes/create",
   "GET /routes/:id/next",
   "POST /properties/:id/interactions",
+  "POST /properties/:id/visual-signals",
   "POST /properties/:id/bills",
   "GET /properties/:id/opportunity-score",
   "GET /territories/:id/map",

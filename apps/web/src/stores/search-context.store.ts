@@ -9,6 +9,10 @@ export interface SearchFilters {
   minimumSystemKw: number | null;
   recentRoofPermit: boolean;
   noDetectedSolar: boolean;
+  poolDetected: boolean;
+  largeRoof: boolean;
+  lowShade: boolean;
+  largeLot: boolean;
   largeProperty: boolean;
   highValueArea: boolean;
   revisit: boolean;
@@ -29,7 +33,7 @@ const FILTERS_KEY = "solar.search.filters";
 const RADIUS_KEY = "solar.search.radius";
 const PROMPTED_KEY = "solar.search.prompted";
 const STORAGE_VERSION_KEY = "solar.search.version";
-const STORAGE_VERSION = "3";
+const STORAGE_VERSION = "4";
 const GENERIC_LOCATION_LABELS = new Set(["current location", "choose a location"]);
 
 const defaultFilters = (): SearchFilters => ({
@@ -38,6 +42,10 @@ const defaultFilters = (): SearchFilters => ({
   minimumSystemKw: null,
   recentRoofPermit: false,
   noDetectedSolar: false,
+  poolDetected: false,
+  largeRoof: false,
+  lowShade: false,
+  largeLot: false,
   largeProperty: false,
   highValueArea: false,
   revisit: false,
@@ -58,9 +66,15 @@ export const useSearchContextStore = defineStore("search-context", () => {
   const contextLabel = computed(() => context.value?.label ?? (locationPermissionDenied.value ? "Choose a location" : ""));
   const filterCount = computed(() =>
     [
+      filters.value.whaleCandidates ? 1 : 0,
+      filters.value.highPriority ? 1 : 0,
       filters.value.minimumSystemKw != null ? 1 : 0,
       filters.value.recentRoofPermit ? 1 : 0,
       filters.value.noDetectedSolar ? 1 : 0,
+      filters.value.poolDetected ? 1 : 0,
+      filters.value.largeRoof ? 1 : 0,
+      filters.value.lowShade ? 1 : 0,
+      filters.value.largeLot ? 1 : 0,
       filters.value.largeProperty ? 1 : 0,
       filters.value.highValueArea ? 1 : 0,
       filters.value.revisit ? 1 : 0,

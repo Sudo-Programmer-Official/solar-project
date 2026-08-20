@@ -16,6 +16,10 @@ import { useSearchContextStore } from "./search-context.store";
 const defaultFilters: DiscoveryScanFilters = {
   whaleCandidates: false,
   noDetectedExistingSolar: false,
+  poolDetected: false,
+  largeRoof: false,
+  lowShade: false,
+  largeLot: false,
 };
 
 export const useHuntStore = defineStore("hunt", () => {
@@ -41,6 +45,7 @@ export const useHuntStore = defineStore("hunt", () => {
   const error = ref<string | null>(null);
   const lastLatitude = ref<number | null>(null);
   const lastLongitude = ref<number | null>(null);
+  const lastSwipeAction = ref<LeadDispositionAction | null>(null);
 
   const visibleSelectedPropertyIds = computed(() =>
     selectedPropertyIds.value.filter((propertyId) => scanResults.value.some((lead) => lead.propertyId === propertyId)),
@@ -78,6 +83,20 @@ export const useHuntStore = defineStore("hunt", () => {
   const solarAnalyzedCount = computed(() => scanProgress.value?.metrics.solarAnalyzedCount ?? scanProgress.value?.solarAnalyzedCount ?? 0);
   const solarAnalysisTarget = computed(() => scanProgress.value?.metrics.solarEligibleCount ?? scanProgress.value?.metrics.prequalifiedCount ?? 0);
   const totalAvailable = computed(() => scanResultsTotal.value);
+  const swipeDeckResults = computed(() => scanResults.value.filter((lead) => isSwipeDeckVisibleOutcome(lead.outcome)));
+  const swipeDeckLead = computed(() => swipeDeckResults.value[0] ?? null);
+  const swipeReviewedCount = computed(() => scanResults.value.length - swipeDeckResults.value.length);
+  const swipeSavedCount = computed(() => scanResults.value.filter((lead) => lead.outcome === "SAVED").length);
+  const swipeRemainingCount = computed(() => swipeDeckResults.value.length);
+  const swipeReviewLabel = computed(() => {
+    if (isScanning.value && swipeDeckResults.value.length === 0) {
+      return "More leads are still being analyzed";
+    }
+    if (isComplete.value && swipeDeckResults.value.length === 0) {
+      return "You've reviewed all strong leads in this scan.";
+    }
+    return `${swipeReviewedCount.value} of ${scanResultsTotal.value || scanResults.value.length || 0} reviewed`;
+  });
 
   function setRadius(value: 5 | 10 | 20) {
     radiusMiles.value = value;
@@ -129,6 +148,8 @@ export const useHuntStore = defineStore("hunt", () => {
     const searchStore = useSearchContextStore();
     const committedFilters = options.filters ?? searchStore.filters ?? filters.value;
     const committedRadius = options.radiusMiles ?? searchStore.radiusMiles ?? radiusMiles.value;
+    radiusMiles.value = committedRadius;
+    filters.value = { ...committedFilters };
     const sessionId = beginScanSession(buildScanSignature(center, committedRadius, committedFilters));
     loading.value = true;
     error.value = null;
@@ -209,13 +230,15 @@ export const useHuntStore = defineStore("hunt", () => {
     }
   }
 
-  async function generateRoute() {
+  async function generateRoute(selectedPropertyIdsOverride?: string[]) {
     if (lastLatitude.value == null || lastLongitude.value == null) {
       throw new Error("Scan location is missing.");
     }
-    const selected = visibleSelectedPropertyIds.value.length > 0
-      ? visibleSelectedPropertyIds.value
-      : scanResults.value.slice(0, 5).map((lead) => lead.propertyId ?? lead.id);
+    const selected = selectedPropertyIdsOverride?.length
+      ? selectedPropertyIdsOverride
+      : visibleSelectedPropertyIds.value.length > 0
+        ? visibleSelectedPropertyIds.value
+        : scanResults.value.slice(0, 5).map((lead) => lead.propertyId ?? lead.id);
     if (selected.length === 0) {
       throw new Error("Select at least one lead before building a route.");
     }
@@ -266,6 +289,39 @@ export const useHuntStore = defineStore("hunt", () => {
     }
   }
 
+  async function setLeadDisposition(propertyId: string, outcome: LeadOutcome["outcome"]) {
+    const previousOutcome = findCurrentOutcome(propertyId) ?? "NEW";
+    patchLeadOutcome(propertyId, outcome);
+    try {
+      const updated = await updateLeadOutcome(propertyId, outcome, null);
+      lastSwipeAction.value = {
+        propertyId,
+        previousOutcome,
+        nextOutcome: outcome,
+      };
+      return updated;
+    } catch (cause) {
+      patchLeadOutcome(propertyId, previousOutcome);
+      throw cause;
+    }
+  }
+
+  async function undoLastSwipeDisposition() {
+    const action = lastSwipeAction.value;
+    if (!action) {
+      return null;
+    }
+    lastSwipeAction.value = null;
+    patchLeadOutcome(action.propertyId, action.previousOutcome);
+    try {
+      return await updateLeadOutcome(action.propertyId, action.previousOutcome, null);
+    } catch (cause) {
+      patchLeadOutcome(action.propertyId, action.nextOutcome);
+      lastSwipeAction.value = action;
+      throw cause;
+    }
+  }
+
   async function loadMoreResults() {
     return loadScanResultsPage({ scanId: currentScanId.value ?? undefined, sessionId: currentScanSession.value });
   }
@@ -294,6 +350,13 @@ export const useHuntStore = defineStore("hunt", () => {
     routeProgress,
     selectedPropertyIds,
     skippedPropertyIds,
+    lastSwipeAction,
+    swipeDeckResults,
+    swipeDeckLead,
+    swipeReviewedCount,
+    swipeSavedCount,
+    swipeRemainingCount,
+    swipeReviewLabel,
     loading,
     routeLoading,
     error,
@@ -322,6 +385,8 @@ export const useHuntStore = defineStore("hunt", () => {
     generateRoute,
     refreshRoute,
     recordOutcome,
+    setLeadDisposition,
+    undoLastSwipeDisposition,
     skipCurrentStop,
   };
 });
@@ -369,6 +434,26 @@ async function loadScanResultsPage(options: { reset?: boolean; scanId?: string; 
   }
 }
 
+function findCurrentOutcome(propertyId: string): LeadOutcome["outcome"] | null {
+  const store = useHuntStore();
+  const lead = store.scanResults.find((item) => (item.propertyId ?? item.id) === propertyId);
+  return lead?.outcome ?? null;
+}
+
+function patchLeadOutcome(propertyId: string, outcome: LeadOutcome["outcome"]) {
+  const store = useHuntStore();
+  store.scanResults = store.scanResults.map((lead) => {
+    const key = lead.propertyId ?? lead.id;
+    if (key !== propertyId) {
+      return lead;
+    }
+    return {
+      ...lead,
+      outcome,
+    };
+  });
+}
+
 function resetScanSnapshot() {
   const store = useHuntStore();
   store.scan = null;
@@ -394,6 +479,7 @@ function beginScanSession(signature: string): number {
   store.scanResultsCursor = null;
   store.scanResultsHasMore = false;
   store.scanResultsTotal = 0;
+  store.lastSwipeAction = null;
   return store.currentScanSession;
 }
 
@@ -416,6 +502,10 @@ function buildScanSignature(
     filters: {
       whaleCandidates: Boolean(filters.whaleCandidates),
       noDetectedExistingSolar: Boolean(filters.noDetectedExistingSolar),
+      poolDetected: Boolean(filters.poolDetected),
+      largeRoof: Boolean(filters.largeRoof),
+      lowShade: Boolean(filters.lowShade),
+      largeLot: Boolean(filters.largeLot),
       largeProperties: Boolean(filters.largeProperties),
       highPriority: Boolean(filters.highPriority),
       recentRoofPermits: Boolean(filters.recentRoofPermits),
@@ -426,6 +516,10 @@ function buildScanSignature(
       minCapacityKw: filters.minCapacityKw ?? null,
     },
   });
+}
+
+function isSwipeDeckVisibleOutcome(outcome: LeadOutcome["outcome"] | undefined | null): boolean {
+  return outcome == null || outcome === "NEW" || outcome === "UNTOUCHED";
 }
 
 function emptyScanResult(
@@ -449,4 +543,10 @@ function emptyScanResult(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+interface LeadDispositionAction {
+  propertyId: string;
+  previousOutcome: LeadOutcome["outcome"];
+  nextOutcome: LeadOutcome["outcome"];
 }

@@ -127,13 +127,25 @@ function matchesGlobalFilters(
   if (filters.highPriority && lead.opportunityScore < 70) {
     return false;
   }
-  if (filters.revisit && lead.outcome !== "NOT_HOME" && lead.outcome !== "BILL_REQUESTED") {
+  if (filters.revisit && lead.outcome !== "REVISIT" && lead.outcome !== "NOT_HOME" && lead.outcome !== "BILL_REQUESTED") {
     return false;
   }
   if (filters.recentRoofPermit && !lead.signals.some((signal) => signal.toLowerCase().includes("permit"))) {
     return false;
   }
-  if (filters.noDetectedSolar && lead.signals.some((signal) => signal.toLowerCase().includes("existing solar"))) {
+  if (filters.poolDetected && !hasDetectedVisualSignal(lead, "POOL")) {
+    return false;
+  }
+  if (filters.largeRoof && !hasLargeRoofSignal(lead)) {
+    return false;
+  }
+  if (filters.lowShade && !hasDetectedVisualSignal(lead, "LOW_SHADE")) {
+    return false;
+  }
+  if (filters.largeLot && !hasDetectedVisualSignal(lead, "LARGE_LOT")) {
+    return false;
+  }
+  if (filters.noDetectedSolar && lead.existingSolarStatus !== "NOT_DETECTED") {
     return false;
   }
   if (filters.largeProperty && !lead.signals.some((signal) => signal.toLowerCase().includes("large"))) {
@@ -147,4 +159,16 @@ function matchesGlobalFilters(
     return false;
   }
   return true;
+}
+
+function hasDetectedVisualSignal(lead: TodayLeadCard, type: NonNullable<NonNullable<TodayLeadCard["visualSignals"]>[number]["type"]>): boolean {
+  return lead.visualSignals?.some((signal) => signal.type === type && signal.status === "DETECTED") ?? false;
+}
+
+function hasLargeRoofSignal(lead: TodayLeadCard): boolean {
+  const capacity = lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw ?? null;
+  if (capacity != null && capacity >= 15) {
+    return true;
+  }
+  return hasDetectedVisualSignal(lead, "LARGE_ROOF");
 }

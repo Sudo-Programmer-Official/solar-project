@@ -30,6 +30,7 @@ declare module 'vue' {
     ScanProgressPanel: typeof import('./src/components/ScanProgressPanel.vue')['default']
     SignalChip: typeof import('./src/components/SignalChip.vue')['default']
     StreetViewPanel: typeof import('./src/components/StreetViewPanel.vue')['default']
+    SwipeHuntDeck: typeof import('./src/components/SwipeHuntDeck.vue')['default']
     WhaleBadge: typeof import('./src/components/WhaleBadge.vue')['default']
     WhaleHunterWorkspace: typeof import('./src/components/WhaleHunterWorkspace.vue')['default']
   }
