@@ -2,7 +2,13 @@ import type { SqlClient } from "./repository";
 
 export interface PostgresPoolLike {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  connect?: () => Promise<PostgresClientLike>;
   end?: () => Promise<void>;
+}
+
+export interface PostgresClientLike {
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  release(): void;
 }
 
 export async function createPostgresClient(dsn: string): Promise<PostgresPoolLike> {
@@ -17,11 +23,32 @@ export async function createPostgresClient(dsn: string): Promise<PostgresPoolLik
 }
 
 export function wrapPool(pool: PostgresPoolLike): SqlClient {
-  return {
+  const client: SqlClient = {
     query(sql: string, params?: unknown[]) {
       return pool.query(sql, params);
     },
   };
+  if (pool.connect) {
+    client.transaction = async <T>(callback: (transactionClient: SqlClient) => Promise<T>): Promise<T> => {
+      const connection = await pool.connect!();
+      try {
+        await connection.query("BEGIN");
+        const result = await callback({
+          query(sql: string, params?: unknown[]) {
+            return connection.query(sql, params);
+          },
+        });
+        await connection.query("COMMIT");
+        return result;
+      } catch (error) {
+        await connection.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        connection.release();
+      }
+    };
+  }
+  return client;
 }
 
 function shouldUseSsl(dsn: string): boolean {

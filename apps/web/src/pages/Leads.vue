@@ -61,6 +61,7 @@
               :key="option.outcome"
               class="rounded-full border px-3 py-2 text-xs font-semibold transition"
               :class="lead.outcome === option.outcome ? activeOutcomeClasses : inactiveOutcomeClasses"
+              :aria-label="`Set lead status to ${option.label}`"
               type="button"
               @click="setOutcome(lead, option.outcome)"
             >

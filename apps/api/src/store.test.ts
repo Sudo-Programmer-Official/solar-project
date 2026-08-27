@@ -5,6 +5,7 @@ import { InMemorySolarRepository } from "../../../packages/database/src/reposito
 import {
   analyzeProperty,
   createRoute,
+  getDiscoveryScan,
   getDiscoveryScanResultsPage,
   getDealBrief,
   getLeadOutcomes,
@@ -689,6 +690,19 @@ test("discovery paginates uniquely and excludes obvious commercial properties", 
   const secondPage = firstPage?.nextCursor ? getDiscoveryScanResultsPage(scan.scanId, firstPage.nextCursor, 20) : null;
 
   assert.equal(scan.results.length, 25);
+  assert.equal((scan.clusters?.length ?? 0) > 0, true);
+  assert.equal(scan.clusters?.some((cluster) => cluster.propertyCount > 1), true);
+  assert.equal(scan.clusters?.every((cluster) => cluster.candidateCount === cluster.propertyCount), true);
+  assert.equal(scan.results.every((lead) => lead.fieldEfficiencyScore != null && lead.fieldPriorityScore != null), true);
+  const progress = getDiscoveryScan(scan.scanId);
+  assert.equal(typeof progress?.metrics.candidateDiscoveryMs, "number");
+  assert.equal(typeof progress?.metrics.dedupeMs, "number");
+  assert.equal(typeof progress?.metrics.classificationMs, "number");
+  assert.equal(typeof progress?.metrics.clusterMs, "number");
+  assert.equal(typeof progress?.metrics.cheapRankingMs, "number");
+  assert.equal(typeof progress?.metrics.firstBatchMs, "number");
+  assert.equal(typeof progress?.metrics.solarEnrichmentMs, "number");
+  assert.equal(typeof progress?.metrics.totalScanMs, "number");
   assert.equal(firstPage?.results.length, 20);
   assert.equal(firstPage?.hasMore, true);
   assert.equal(firstPage?.totalAvailable, 25);

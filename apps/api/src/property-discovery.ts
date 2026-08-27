@@ -6,7 +6,7 @@ export interface DiscoveredProperty {
   latitude: number;
   longitude: number;
   parcelId?: string;
-  propertyType: "SINGLE_FAMILY" | "MULTI_FAMILY" | "RESIDENTIAL" | "COMMERCIAL" | "INDUSTRIAL" | "UNKNOWN";
+  propertyType: "SINGLE_FAMILY" | "MULTI_FAMILY" | "COMMERCIAL" | "INDUSTRIAL" | "VACANT" | "OTHER" | "RESIDENTIAL" | "UNKNOWN";
   buildingAreaSqFt?: number;
   lotAreaSqFt?: number;
   source: string;
@@ -51,7 +51,7 @@ export class OverpassPropertyDiscoveryProvider implements PropertyDiscoveryProvi
       return [];
     }
 
-    const radiusMeters = Math.max(1000, Math.min(50_000, Math.round(input.radiusMiles * 1609.344)));
+    const radiusMeters = Math.max(100, Math.min(50_000, Math.round(input.radiusMiles * 1609.344)));
     const query = this.buildQuery(input.latitude, input.longitude, radiusMeters, Math.max(1, Math.ceil(this.timeoutMs / 1000)));
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -227,8 +227,11 @@ function inferPropertyType(tags: Record<string, string | undefined>): Discovered
   const industrial = (tags.industrial ?? "").toLowerCase();
   const shop = (tags.shop ?? "").toLowerCase();
   const office = (tags.office ?? "").toLowerCase();
+  const buildingType = building.replace(/_/g, " ");
+  if (landuse === "construction" || landuse === "brownfield" || landuse === "greenfield" || buildingType === "vacant") return "VACANT";
   if (building.includes("industrial") || landuse === "industrial" || industrial.length > 0) return "INDUSTRIAL";
-  if (building.includes("commercial") || landuse === "commercial" || amenity.length > 0 || shop.length > 0 || office.length > 0) return "COMMERCIAL";
+  if (building.includes("commercial") || landuse === "commercial" || amenity.length > 0 || shop.length > 0 || office.length > 0 || ["parking", "utility", "railway", "service"].includes(building)) return "COMMERCIAL";
+  if (["school", "church", "hospital", "civic", "government", "train station"].includes(buildingType)) return "OTHER";
   if (building.length === 0 && typeof tags["addr:housenumber"] === "string") {
     return "SINGLE_FAMILY";
   }
@@ -236,7 +239,7 @@ function inferPropertyType(tags: Record<string, string | undefined>): Discovered
   if (building.includes("house") || building.includes("residential") || building.includes("detached") || building.includes("semidetached_house") || building.includes("terrace") || building.includes("bungalow") || building.includes("villa") || building.includes("home") || building.includes("cabin")) {
     return "SINGLE_FAMILY";
   }
-  return "RESIDENTIAL";
+  return "UNKNOWN";
 }
 
 function inferConfidence(tags: Record<string, string | undefined>): number {

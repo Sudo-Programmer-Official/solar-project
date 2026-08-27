@@ -473,7 +473,7 @@ async function saveSignals() {
 }
 
 function goBack() {
-  router.push("/today");
+  router.push("/labs/lead-finder");
 }
 
 function verifyOnGoogleMaps() {

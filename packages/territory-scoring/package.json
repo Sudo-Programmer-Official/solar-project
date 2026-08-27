@@ -1,0 +1,12 @@
+{
+  "name": "@solar/territory-scoring",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@solar/analytics-contracts": "file:../analytics-contracts",
+    "@solar/geo-core": "file:../geo-core",
+    "xlsx": "^0.18.5"
+  }
+}

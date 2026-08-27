@@ -135,6 +135,7 @@ export interface QueryResult<T = QueryRow> {
 
 export interface SqlClient {
   query<T = QueryRow>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
+  transaction?<T>(callback: (client: SqlClient) => Promise<T>): Promise<T>;
 }
 
 export class InMemorySolarRepository implements SolarRepository {

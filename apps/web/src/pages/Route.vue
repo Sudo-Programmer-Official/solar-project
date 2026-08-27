@@ -18,7 +18,7 @@
       title="No route yet"
       message="Scan around you and add leads to a route first."
       action-label="Go to Scan"
-      @action="router.push('/hunt')"
+      @action="router.push('/labs/lead-finder')"
     />
 
     <template v-else>

@@ -1,6 +1,6 @@
 # Solar Territory Intelligence Platform
 
-Scaffold for a modular solar territory intelligence system.
+TypeScript monorepo for the SolarScout lead-discovery, field-operations, and territory-intelligence platform.
 
 Current contents:
 - Workspace layout for apps and packages
@@ -9,4 +9,4 @@ Current contents:
 - Connector interface and metadata model
 - Initial docs for architecture, data sources, compliance, and connector development
 
-This repo currently contains the foundation only. The next implementation step is to add runtime dependencies and app frameworks for API, web, worker, and admin surfaces.
+The production boundary is one user-facing `apps/web` application and one `apps/api` server backed by PostgreSQL. Territory intelligence is integrated into the API and the web app's Insights page; no worker process or second API is required. See [docs/territory-intelligence.md](docs/territory-intelligence.md) for data boundaries, metric semantics, and API import instructions.

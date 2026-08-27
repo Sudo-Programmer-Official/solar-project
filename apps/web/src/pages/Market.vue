@@ -403,7 +403,7 @@ async function huntArea(id: string) {
     placeId: area.id,
   });
   void hunt.runScan({ latitude: area.centerLatitude, longitude: area.centerLongitude }, { radiusMiles: searchContextStore.radiusMiles });
-  await router.push("/hunt");
+  await router.push("/labs/lead-finder");
 }
 
 function setRadius(value: 5 | 10 | 20) {

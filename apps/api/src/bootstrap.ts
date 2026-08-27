@@ -3,11 +3,19 @@ import {
   createPostgresClient,
   InMemorySolarRepository,
   PostgresSolarRepository,
+  PostgresPlatformRepository,
   runDatabaseMigrations,
   wrapPool,
   type SqlClient,
   type SolarRepository,
+  type PlatformRepository,
+  PostgresFieldOperationsRepository,
+  type FieldOperationsRepository,
 } from "../../../packages/database/src/index";
+import {
+  PostgresIntelligenceRepository,
+  type IntelligenceRepository,
+} from "../../../packages/territory-scoring/src/index";
 
 const expectedTables = [
   "properties",
@@ -22,9 +30,40 @@ const expectedTables = [
   "opportunity_assessments",
 ];
 
+const expectedPlatformTables = [
+  "users",
+  "roles",
+  "permissions",
+  "user_roles",
+  "role_permissions",
+  "sessions",
+  "invites",
+  "audit_log",
+  "teams",
+  "user_teams",
+  "leads",
+  "closer_availability",
+  "appointments",
+  "notes",
+  "bill_attachments",
+  "activities",
+  "sheet_sync_jobs",
+];
+
+const expectedIntelligenceTables = [
+  "uploads",
+  "appointments",
+  "territory_daily",
+  "rep_daily",
+  "result_daily",
+];
+
 export interface ApiBootstrapContext {
   env: ReturnType<typeof loadAppEnv>;
   repository: SolarRepository;
+  platformRepository: PlatformRepository;
+  fieldOperationsRepository: FieldOperationsRepository;
+  intelligenceRepository: IntelligenceRepository;
   readyCheck: () => Promise<void>;
   close: () => Promise<void>;
 }
@@ -47,6 +86,9 @@ export async function createApiBootstrapContext(options: ApiBootstrapOptions = {
 
   const pool = await createPostgresClient(databaseUrl);
   const repository = new PostgresSolarRepository(wrapPool(pool));
+  const platformRepository = new PostgresPlatformRepository(wrapPool(pool));
+  const fieldOperationsRepository = new PostgresFieldOperationsRepository(wrapPool(pool));
+  const intelligenceRepository = new PostgresIntelligenceRepository(wrapPool(pool));
   const readyCheck = createDatabaseReadinessChecker(pool);
 
   if (options.applyMigrations) {
@@ -58,6 +100,9 @@ export async function createApiBootstrapContext(options: ApiBootstrapOptions = {
   return {
     env,
     repository,
+    platformRepository,
+    fieldOperationsRepository,
+    intelligenceRepository,
     readyCheck,
     close: async () => {
       await pool.end?.();
@@ -110,15 +155,23 @@ export async function checkDatabaseHealth(pool: SqlClient): Promise<void> {
 }
 
 async function findMissingTables(pool: SqlClient): Promise<string[]> {
-  const result = await pool.query<{ table_name: string | null }>(
+  const result = await pool.query<{ table_schema: string; table_name: string | null }>(
     `
-      SELECT table_name
+      SELECT table_schema, table_name
       FROM information_schema.tables
-      WHERE table_schema = 'public'
-        AND table_name = ANY($1::text[])
+       WHERE (table_schema = 'public' AND table_name = ANY($1::text[]))
+         OR (table_schema = 'field_ops' AND table_name = ANY($2::text[]))
+         OR (table_schema = 'sales' AND table_name = ANY($3::text[]))
+         OR (table_schema = 'analytics' AND table_name = ANY($4::text[]))
     `,
-    [expectedTables],
+    [expectedTables, expectedPlatformTables, ["uploads", "appointments"], ["territory_daily", "rep_daily", "result_daily"]],
   );
-  const present = new Set(result.rows.map((row) => row.table_name).filter((value): value is string => Boolean(value)));
-  return expectedTables.filter((table) => !present.has(table));
+  const present = new Set(result.rows.map((row) => `${row.table_schema}.${row.table_name}`));
+  return [
+    ...expectedTables.filter((table) => !present.has(`public.${table}`)).map((table) => `public.${table}`),
+    ...expectedPlatformTables.filter((table) => !present.has(`field_ops.${table}`)).map((table) => `field_ops.${table}`),
+    ...expectedIntelligenceTables
+      .filter((table) => !present.has(`${table === "uploads" || table === "appointments" ? "sales" : "analytics"}.${table}`))
+      .map((table) => `${table === "uploads" || table === "appointments" ? "sales" : "analytics"}.${table}`),
+  ];
 }

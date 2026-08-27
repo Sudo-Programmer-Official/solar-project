@@ -730,6 +730,45 @@ export interface DiscoveryScanLead extends TodayLeadCard {
   analysisStatus: "ANALYZED" | "ANALYZING" | "CACHED";
   candidateScore: number;
   routeReason: string;
+  clusterId?: string | null;
+  propertyOpportunityScore?: number;
+  solarOpportunityScore?: number;
+  fieldEfficiencyScore?: number;
+  fieldPriorityScore?: number;
+}
+
+export type LowEfficiencyZoneLabel =
+  | "LOW_LEAD_DENSITY"
+  | "SPARSE_HOUSING"
+  | "DIFFICULT_TERRAIN"
+  | "LONG_DRIVEWAYS"
+  | "POOR_ROAD_ACCESS"
+  | "HIGH_EXISTING_SOLAR"
+  | "LOW_PROPERTY_FIT"
+  | "HIGH_PRIOR_REJECTION"
+  | "ACCESS_RESTRICTION";
+
+export interface NeighborhoodCluster {
+  clusterId: string;
+  center: ScanCenter;
+  propertyCount: number;
+  strongLeadCount: number;
+  whaleCount: number;
+  averageOpportunityScore: number;
+  averageCapacityKw: number | null;
+  densityScore: number;
+  routeEfficiencyScore: number;
+  terrainScore: number;
+  estimatedMinutes: number;
+  fieldEfficiencyScore: number;
+  fieldPriorityScore: number;
+  lowEfficiencyZones?: LowEfficiencyZoneLabel[];
+}
+
+export interface DiscoveryClusterSummary extends NeighborhoodCluster {
+  id: string;
+  candidateCount: number;
+  averageSolarScore: number;
 }
 
 export const DiscoveryScanStage = {
@@ -823,6 +862,7 @@ export interface DiscoveryScanResult {
   qualifiedLeadCount: number;
   solarAnalyzedCount: number;
   results: DiscoveryScanLead[];
+  clusters?: DiscoveryClusterSummary[];
 }
 
 export interface DiscoveryScanResultsPage {
@@ -862,6 +902,14 @@ export interface DiscoveryScanMetrics {
   preRankingMs: number | null;
   solarAnalysisMs: number | null;
   finalRankingMs: number | null;
+  candidateDiscoveryMs: number | null;
+  dedupeMs: number | null;
+  classificationMs: number | null;
+  clusterMs: number | null;
+  cheapRankingMs: number | null;
+  firstBatchMs: number | null;
+  solarEnrichmentMs: number | null;
+  totalScanMs: number | null;
   totalMs: number | null;
 }
 
@@ -1047,4 +1095,217 @@ export interface ExistingSolarResult {
   status: "confirmed" | "likely" | "unknown";
   confidence: number;
   evidence: ExistingSolarSignal[];
+}
+
+/**
+ * Platform-level access contracts. These are shared by the web shell and the
+ * API so modules can be enabled by permission instead of by separate apps.
+ */
+export const PlatformRole = {
+  SUPER_ADMIN: "SUPER_ADMIN",
+  ADMIN: "ADMIN",
+  MANAGER: "MANAGER",
+  SETTER: "SETTER",
+  CLOSER: "CLOSER",
+} as const;
+
+export type PlatformRole = (typeof PlatformRole)[keyof typeof PlatformRole];
+
+export type PlatformPermission =
+  | "lead:create"
+  | "lead:view-own"
+  | "lead:view-assigned"
+  | "lead:view-team"
+  | "lead:view-all"
+  | "lead:update-own"
+  | "lead:update-all"
+  | "appointment:create"
+  | "appointment:view-own"
+  | "appointment:view-assigned"
+  | "appointment:view-team"
+  | "appointment:assign"
+  | "appointment:reassign"
+  | "appointment:update-outcome"
+  | "bill:upload"
+  | "bill:view-assigned"
+  | "bill:view-all"
+  | "team:view"
+  | "team:create-user"
+  | "team:update-user"
+  | "team:assign-role"
+  | "analytics:view"
+  | "reports:view"
+  | "reports:view-own"
+  | "reports:export"
+  | "labs:view"
+  | "system:manage"
+  | "territory:view"
+  | "territory:manage";
+
+export type PlatformFeatureFlag =
+  | "leadFinderEnabled"
+  | "routeOptimizerEnabled"
+  | "installationSignalsEnabled"
+  | "aiTerritoryScoreEnabled";
+
+export interface PlatformFeatureFlags {
+  leadFinderEnabled: boolean;
+  routeOptimizerEnabled: boolean;
+  installationSignalsEnabled: boolean;
+  aiTerritoryScoreEnabled: boolean;
+}
+
+export type PlatformModule =
+  | "OVERVIEW"
+  | "HOME"
+  | "APPOINTMENTS"
+  | "OPERATIONS"
+  | "LEADS"
+  | "SCHEDULE"
+  | "MAP"
+  | "TEAM"
+  | "REPORTS"
+  | "INSIGHTS"
+  | "LABS"
+  | "SYSTEM"
+  | "MORE"
+  | "LEAD_FINDER"
+  | "HOOD_NAVIGATOR"
+  | "INSTALLATION_SIGNALS"
+  | "ROUTE_EXPERIMENT";
+
+export interface PlatformModuleDefinition {
+  id: PlatformModule;
+  label: string;
+  route: string;
+  permission?: PlatformPermission;
+  anyPermissions?: readonly PlatformPermission[];
+  feature?: PlatformFeatureFlag;
+  parent?: PlatformModule;
+}
+
+export const PLATFORM_MODULE_REGISTRY: readonly PlatformModuleDefinition[] = [
+  { id: "OVERVIEW", label: "Overview", route: "/overview", permission: "system:manage" },
+  { id: "HOME", label: "Home", route: "/home", anyPermissions: ["lead:create", "lead:view-own", "lead:view-assigned", "lead:view-team", "lead:view-all"] },
+  { id: "APPOINTMENTS", label: "Appointments", route: "/appointments", anyPermissions: ["appointment:view-assigned", "appointment:view-team"] },
+  { id: "OPERATIONS", label: "Operations", route: "/operations", anyPermissions: ["team:view", "appointment:assign"] },
+  { id: "LEADS", label: "Leads", route: "/leads", anyPermissions: ["lead:view-own", "lead:view-assigned", "lead:view-team", "lead:view-all"] },
+  { id: "SCHEDULE", label: "Schedule", route: "/schedule", anyPermissions: ["appointment:create", "appointment:view-own", "appointment:view-assigned", "appointment:view-team"] },
+  { id: "MAP", label: "Map", route: "/map", permission: "analytics:view" },
+  { id: "TEAM", label: "Team", route: "/team", permission: "team:view" },
+  { id: "REPORTS", label: "Reports", route: "/reports", permission: "reports:view" },
+  { id: "INSIGHTS", label: "Insights", route: "/insights", anyPermissions: ["analytics:view", "territory:view", "reports:view"] },
+  { id: "LABS", label: "Labs", route: "/labs", permission: "labs:view" },
+  { id: "SYSTEM", label: "System", route: "/system", permission: "system:manage" },
+  { id: "MORE", label: "More", route: "/more" },
+  { id: "LEAD_FINDER", label: "Lead Finder", route: "/labs/lead-finder", permission: "labs:view", feature: "leadFinderEnabled", parent: "LABS" },
+  { id: "HOOD_NAVIGATOR", label: "Hood Navigator", route: "/labs/hood-navigator", permission: "labs:view", parent: "LABS" },
+  { id: "INSTALLATION_SIGNALS", label: "Installation Signals", route: "/labs/installation-signals", permission: "labs:view", feature: "installationSignalsEnabled", parent: "LABS" },
+  { id: "ROUTE_EXPERIMENT", label: "Route Experiments", route: "/labs/route", permission: "labs:view", feature: "routeOptimizerEnabled", parent: "LABS" },
+];
+
+export function resolvePlatformModules(
+  permissions: readonly PlatformPermission[] | readonly ["*"],
+  featureFlags: PlatformFeatureFlags,
+): PlatformModule[] {
+  const grantedPermissions = permissions as readonly string[];
+  const can = (permission: PlatformPermission) => grantedPermissions.includes("*") || grantedPermissions.includes(permission);
+  return PLATFORM_MODULE_REGISTRY
+    .filter((module) => {
+      const permissionAllowed = module.permission == null && module.anyPermissions == null
+        ? true
+        : module.permission != null
+          ? can(module.permission)
+          : module.anyPermissions?.some(can) ?? false;
+      return permissionAllowed && (module.feature == null || featureFlags[module.feature]);
+    })
+    .map((module) => module.id);
+}
+
+export function primaryPlatformRoute(modules: readonly PlatformModule[]): string {
+  const priority: readonly PlatformModule[] = ["OVERVIEW", "OPERATIONS", "APPOINTMENTS", "HOME"];
+  const preferred = priority.find((module) => modules.includes(module));
+  if (preferred) return PLATFORM_MODULE_REGISTRY.find((module) => module.id === preferred)?.route ?? "/home";
+  return PLATFORM_MODULE_REGISTRY.find((module) => modules.includes(module.id) && module.id !== "MORE")?.route ?? "/more";
+}
+
+export interface PlatformUserContext {
+  id: string | null;
+  displayName: string;
+  roles: readonly PlatformRole[];
+  permissions: readonly PlatformPermission[] | readonly ["*"];
+  featureFlags: PlatformFeatureFlags;
+  modules: readonly PlatformModule[];
+}
+
+export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPermission[] | readonly ["*"]> = {
+  SUPER_ADMIN: ["*"],
+  ADMIN: [
+    "lead:view-team",
+    "lead:update-all",
+    "appointment:view-team",
+    "appointment:assign",
+    "appointment:reassign",
+    "team:view",
+    "team:create-user",
+    "team:update-user",
+    "team:assign-role",
+    "analytics:view",
+    "reports:view",
+    "reports:export",
+    "territory:view",
+    "territory:manage",
+  ],
+  MANAGER: [
+    "lead:view-own",
+    "lead:view-team",
+    "lead:update-all",
+    "appointment:view-team",
+    "appointment:assign",
+    "appointment:reassign",
+    "appointment:update-outcome",
+    "team:view",
+    "team:create-user",
+    "team:update-user",
+    "team:assign-role",
+    "analytics:view",
+    "reports:view",
+    "reports:export",
+    "territory:view",
+  ],
+  SETTER: [
+    "lead:create",
+    "lead:view-own",
+    "lead:update-own",
+    "appointment:create",
+    "appointment:view-own",
+    "bill:upload",
+    "reports:view-own",
+  ],
+  CLOSER: [
+    "lead:update-own",
+    "lead:view-assigned",
+    "appointment:view-assigned",
+    "appointment:update-outcome",
+    "bill:upload",
+    "bill:view-assigned",
+    "reports:view-own",
+  ],
+};
+
+export const DEFAULT_PLATFORM_FEATURE_FLAGS: PlatformFeatureFlags = {
+  leadFinderEnabled: true,
+  routeOptimizerEnabled: false,
+  installationSignalsEnabled: true,
+  aiTerritoryScoreEnabled: false,
+};
+
+export function platformRoleCan(role: PlatformRole, permission: PlatformPermission): boolean {
+  const permissions = PLATFORM_ROLE_PERMISSIONS[role];
+  if (permissions[0] === "*") return true;
+  return (permissions as readonly PlatformPermission[]).includes(permission);
+}
+
+export function platformRolesCan(roles: readonly PlatformRole[], permission: PlatformPermission): boolean {
+  return roles.some((role) => platformRoleCan(role, permission));
 }

@@ -1,0 +1,10 @@
+{
+  "name": "@solar/geo-core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@solar/analytics-contracts": "file:../analytics-contracts"
+  }
+}

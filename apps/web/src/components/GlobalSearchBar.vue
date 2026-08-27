@@ -444,7 +444,7 @@ async function findBestDoors(options: { quiet?: boolean } = {}) {
       },
     );
     if (!options.quiet) {
-      await router.push("/hunt");
+      await router.push("/labs/lead-finder");
     }
   } catch {
     notifyError("Scan failed. Try again.");
@@ -471,11 +471,11 @@ async function handleMobileCommand(command: string) {
     return;
   }
   if (command === "list-view") {
-    await router.push({ path: "/hunt", query: { ...router.currentRoute.value.query, view: "list" } });
+    await router.push({ path: "/labs/lead-finder", query: { ...router.currentRoute.value.query, view: "list" } });
     return;
   }
   if (command === "swipe-view") {
-    await router.push({ path: "/hunt", query: { ...router.currentRoute.value.query, view: "swipe" } });
+    await router.push({ path: "/labs/lead-finder", query: { ...router.currentRoute.value.query, view: "swipe" } });
   }
 }
 

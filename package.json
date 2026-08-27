@@ -20,13 +20,19 @@
     "build": "npm run build:web && tsc -p tsconfig.build.json",
     "build:web": "npm run build --workspace @solar/web",
     "dev": "node scripts/dev.mjs",
+    "dev:all": "node scripts/dev.mjs",
     "dev:web": "npm run dev --workspace @solar/web",
     "solar:test": "node --import tsx apps/api/src/cli/analyze-address.ts",
     "dev:api": "node --import tsx apps/api/src/server.ts",
-    "start:api": "node --import tsx apps/api/src/server.ts"
+    "start:api": "node --import tsx apps/api/src/server.ts",
+    "platform:create-user": "node --import tsx apps/api/src/cli/create-platform-user.ts",
+    "db:seed:test-users": "node --import tsx apps/api/src/cli/seed-test-users.ts",
+    "db:seed:qa": "node --import tsx apps/api/src/cli/seed-qa.ts",
+    "db:clean:qa-data": "node --import tsx apps/api/src/cli/clean-qa-data.ts"
   },
   "dependencies": {
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

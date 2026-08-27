@@ -78,7 +78,9 @@ export const useHuntStore = defineStore("hunt", () => {
   });
   const scanStatus = computed(() => scanProgress.value?.status ?? null);
   const scanStage = computed(() => scanProgress.value?.stage ?? scanStatus.value);
-  const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !["COMPLETE", "PARTIAL", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"].includes(scanStatus.value)));
+  const terminalScanStatuses = ["COMPLETE", "PARTIAL", "FAILED", "DISCOVERY_FAILED", "DATA_COVERAGE_UNAVAILABLE"];
+  const isTerminal = computed(() => Boolean(scanStatus.value && terminalScanStatuses.includes(scanStatus.value)));
+  const isScanning = computed(() => loading.value || Boolean(scanStatus.value && !terminalScanStatuses.includes(scanStatus.value)));
   const isComplete = computed(() => scanStatus.value === "COMPLETE");
   const discoveredCount = computed(() => scanProgress.value?.propertiesFound ?? scanProgress.value?.metrics.rawDiscoveredCount ?? scanProgress.value?.metrics.discoveredCount ?? scanProgress.value?.metrics.discoveredProperties ?? 0);
   const strongLeadCount = computed(() => scanProgress.value?.metrics.qualifiedLeadCount ?? scanProgress.value?.qualifiedLeadCount ?? scanResults.value.length ?? 0);
@@ -204,8 +206,9 @@ export const useHuntStore = defineStore("hunt", () => {
           scanProgress.value = nextProgress;
           scan.value = nextProgress;
         }
-        if (scanProgress.value && (scanProgress.value.metrics.qualifiedLeadCount ?? scanProgress.value.metrics.resultsFound) > 0 && scanResults.value.length === 0) {
-          await loadScanResultsPage({ reset: true, scanId: job.scanId, sessionId });
+        const availableLeadCount = scanProgress.value?.metrics.qualifiedLeadCount ?? scanProgress.value?.metrics.resultsFound ?? 0;
+        if (availableLeadCount > scanResults.value.length && !scanResultsLoading.value) {
+          await loadScanResultsPage({ reset: scanResults.value.length === 0, scanId: job.scanId, sessionId });
         }
       }
       if (scanProgress.value && !terminalStatuses.has(scanProgress.value.status) && Date.now() >= hardPollDeadline) {
@@ -390,6 +393,7 @@ export const useHuntStore = defineStore("hunt", () => {
     scanStatus,
     scanStage,
     isScanning,
+    isTerminal,
     isComplete,
     discoveredCount,
     strongLeadCount,

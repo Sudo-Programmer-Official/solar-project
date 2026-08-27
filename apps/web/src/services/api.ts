@@ -28,9 +28,122 @@ import type {
   ConversationInsight,
   HomeownerConfirmationState,
   PropertyVisualSignal,
+  PlatformPermission,
+  PlatformRole,
+  PlatformFeatureFlags,
+  PlatformModule,
 } from "@solar/contracts";
+import type { IntelligenceDashboard } from "@solar/analytics-contracts";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+
+export interface PlatformAuthUser {
+  id: string;
+  displayName: string;
+  email: string;
+  phone: string | null;
+  active: boolean;
+  mustChangePassword: boolean;
+  roles: PlatformRole[];
+  permissions: PlatformPermission[];
+  teamIds: string[];
+  featureFlags: PlatformFeatureFlags;
+  modules: PlatformModule[];
+}
+
+export interface TeamMember extends PlatformAuthUser {
+  firstName: string;
+  lastName: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface TeamMemberInput {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  password?: string;
+  roles: PlatformRole[];
+}
+
+export interface FieldLead {
+  id: string;
+  propertyId: string | null;
+  setterId: string | null;
+  currentCloserId: string | null;
+  createdByUserId: string | null;
+  teamId: string | null;
+  homeownerName: string;
+  phone: string | null;
+  email: string | null;
+  addressLine1: string;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  utility: string | null;
+  supplier: string | null;
+  approximateMonthlyBill: number | null;
+  qualification: unknown;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FieldAppointment {
+  id: string;
+  leadId: string;
+  setterId: string | null;
+  closerId: string | null;
+  teamId: string | null;
+  scheduledStart: string;
+  scheduledEnd: string;
+  timezone: string;
+  appointmentType: string;
+  status: string;
+  outcome: string | null;
+  outcomeNotes: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  assignedAt: string | null;
+  assignedBy: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FieldAvailabilitySlot {
+  id: string;
+  closerId: string;
+  closerName: string;
+  slotStart: string;
+  slotEnd: string;
+  timezone: string;
+  capacity: number;
+  bookedCount: number;
+  status: string;
+  note: string | null;
+}
+
+export interface FieldLeadContext {
+  lead: FieldLead;
+  appointments: FieldAppointment[];
+  notes: Array<{ id: string; leadId: string; appointmentId: string | null; authorId: string | null; kind: string; body: string | null; createdAt: string }>;
+  bills: Array<{ id: string; leadId: string; uploadedBy: string | null; storageKey: string; fileName: string; mimeType: string; fileSizeBytes: number; createdAt: string }>;
+  activities: Array<{ id: string; leadId: string; actorId: string | null; eventType: string; event: unknown; createdAt: string }>;
+  sheetSync: { id: string; leadId: string; status: string; attempts: number; lastSyncedAt: string | null; lastError: string | null; nextAttemptAt: string | null; updatedAt: string } | null;
+}
+
+export interface FieldReport {
+  leadCount: number;
+  appointmentCount: number;
+  byStatus: Array<{ status: string; count: number }>;
+  byOutcome: Array<{ outcome: string; count: number }>;
+  sync: { pending: number; synced: number; failed: number };
+}
 
 export interface PropertyDetailPayload {
   property: {
@@ -139,10 +252,23 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(resolveUrl(path), {
+    let response = await fetch(resolveUrl(path), {
       ...init,
+      credentials: "include",
       signal: init?.signal ?? controller.signal,
     });
+    if (response.status === 401 && !path.startsWith("/api/v1/auth/")) {
+      try {
+        await refreshSession();
+        response = await fetch(resolveUrl(path), {
+          ...init,
+          credentials: "include",
+          signal: init?.signal ?? controller.signal,
+        });
+      } catch {
+        return null;
+      }
+    }
     if (!response.ok) {
       return null;
     }
@@ -152,6 +278,172 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+async function requestPlatformJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 5000);
+  try {
+    let response = await fetch(resolveUrl(path), {
+      ...init,
+      credentials: "include",
+      headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+      signal: init.signal ?? controller.signal,
+    });
+    if (response.status === 401 && !path.startsWith("/api/v1/auth/")) {
+      await refreshSession();
+      response = await fetch(resolveUrl(path), {
+        ...init,
+        credentials: "include",
+        headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+        signal: init.signal ?? controller.signal,
+      });
+    }
+    const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
+    if (!response.ok) {
+      const error = new Error(payload.error || `Request failed with status ${response.status}`);
+      Object.assign(error, { status: response.status, code: payload.code });
+      throw error;
+    }
+    return payload as T;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function getCurrentUser(): Promise<PlatformAuthUser | null> {
+  try {
+    const response = await requestPlatformJson<{ user: PlatformAuthUser }>("/api/v1/auth/me", { method: "GET" });
+    return response.user;
+  } catch {
+    return null;
+  }
+}
+
+export async function login(email: string, password: string): Promise<PlatformAuthUser> {
+  const response = await requestPlatformJson<{ user: PlatformAuthUser }>("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  return response.user;
+}
+
+export async function logout(): Promise<void> {
+  await requestPlatformJson<{ ok: true }>("/api/v1/auth/logout", { method: "POST" });
+}
+
+export async function refreshSession(): Promise<PlatformAuthUser> {
+  const response = await requestPlatformJson<{ user: PlatformAuthUser }>("/api/v1/auth/refresh", { method: "POST" });
+  return response.user;
+}
+
+export async function acceptInvite(token: string, password: string): Promise<void> {
+  await requestPlatformJson<{ ok: true }>("/api/v1/auth/invite/accept", {
+    method: "POST",
+    body: JSON.stringify({ token, password }),
+  });
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<PlatformAuthUser> {
+  const response = await requestPlatformJson<{ user: PlatformAuthUser }>("/api/v1/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  return response.user;
+}
+
+export async function getTeamMembers(): Promise<TeamMember[]> {
+  const response = await requestPlatformJson<{ users: TeamMember[] }>("/api/v1/team", { method: "GET" });
+  return response.users;
+}
+
+export async function createTeamMember(input: TeamMemberInput): Promise<{ user: TeamMember; invite: { token?: string; expiresAt: string } | null }> {
+  return requestPlatformJson("/api/v1/team/users", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function updateTeamMember(id: string, input: Partial<TeamMemberInput> & { active?: boolean }): Promise<TeamMember> {
+  const response = await requestPlatformJson<{ user: TeamMember }>(`/api/v1/team/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  return response.user;
+}
+
+export async function createTeamInvite(id: string): Promise<{ token?: string; expiresAt: string }> {
+  const response = await requestPlatformJson<{ invite: { token?: string; expiresAt: string } }>(`/api/v1/team/users/${encodeURIComponent(id)}/invite`, { method: "POST" });
+  return response.invite;
+}
+
+export async function getFieldLeads(): Promise<FieldLead[]> {
+  const response = await requestPlatformJson<{ leads: FieldLead[] }>("/api/v1/field/leads", { method: "GET" });
+  return response.leads;
+}
+
+export async function getFieldLead(id: string): Promise<FieldLeadContext> {
+  return requestPlatformJson<FieldLeadContext>(`/api/v1/field/leads/${encodeURIComponent(id)}`, { method: "GET" });
+}
+
+export async function createFieldLead(input: Record<string, unknown>): Promise<FieldLead> {
+  const response = await requestPlatformJson<{ lead: FieldLead }>("/api/v1/field/leads", { method: "POST", body: JSON.stringify(input) });
+  return response.lead;
+}
+
+export async function getFieldAvailability(from?: string, to?: string): Promise<FieldAvailabilitySlot[]> {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const response = await requestPlatformJson<{ slots: FieldAvailabilitySlot[] }>(`/api/v1/field/availability${params.toString() ? `?${params}` : ""}`, { method: "GET" });
+  return response.slots;
+}
+
+export async function getFieldClosers(): Promise<Array<{ id: string; displayName: string; teamIds: string[] }>> {
+  const response = await requestPlatformJson<{ closers: Array<{ id: string; displayName: string; teamIds: string[] }> }>("/api/v1/field/closers", { method: "GET" });
+  return response.closers;
+}
+
+export async function createFieldAvailability(input: Record<string, unknown>): Promise<FieldAvailabilitySlot> {
+  const response = await requestPlatformJson<{ slot: FieldAvailabilitySlot }>("/api/v1/field/availability", { method: "POST", body: JSON.stringify(input) });
+  return response.slot;
+}
+
+export async function createFieldAppointment(leadId: string, slotId: string, appointmentType?: string): Promise<FieldAppointment> {
+  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/leads/${encodeURIComponent(leadId)}/appointments`, { method: "POST", body: JSON.stringify({ slotId, appointmentType }) });
+  return response.appointment;
+}
+
+export async function getFieldAppointments(): Promise<FieldAppointment[]> {
+  const response = await requestPlatformJson<{ appointments: FieldAppointment[] }>("/api/v1/field/appointments", { method: "GET" });
+  return response.appointments;
+}
+
+export async function getFieldAppointment(id: string): Promise<{ context: FieldLeadContext; appointment: FieldAppointment }> {
+  return requestPlatformJson(`/api/v1/field/appointments/${encodeURIComponent(id)}`, { method: "GET" });
+}
+
+export async function assignFieldAppointment(id: string, closerId: string): Promise<FieldAppointment> {
+  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/appointments/${encodeURIComponent(id)}/assign`, { method: "POST", body: JSON.stringify({ closerId }) });
+  return response.appointment;
+}
+
+export async function updateFieldOutcome(id: string, outcome: string, outcomeNotes?: string): Promise<FieldAppointment> {
+  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/appointments/${encodeURIComponent(id)}/outcome`, { method: "POST", body: JSON.stringify({ outcome, outcomeNotes }) });
+  return response.appointment;
+}
+
+export async function addFieldNote(leadId: string, body: string, appointmentId?: string): Promise<void> {
+  await requestPlatformJson(`/api/v1/field/leads/${encodeURIComponent(leadId)}/notes`, { method: "POST", body: JSON.stringify({ body, appointmentId }) });
+}
+
+export async function addFieldBill(leadId: string, input: { storageKey: string; fileName: string; mimeType: string; fileSizeBytes: number }): Promise<void> {
+  await requestPlatformJson(`/api/v1/field/leads/${encodeURIComponent(leadId)}/bills`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function getFieldReport(): Promise<FieldReport> {
+  return requestPlatformJson<FieldReport>("/api/v1/field/reports", { method: "GET" });
+}
+
+export async function getIntelligenceDashboard(): Promise<IntelligenceDashboard | null> {
+  return requestJson<IntelligenceDashboard>("/api/v1/intelligence/dashboard");
 }
 
 function resolveUrl(path: string): string {
@@ -179,6 +471,7 @@ export async function resolveLocation(body: LocationResolveRequest): Promise<Loc
     const response = await fetch(resolveUrl("/api/v1/locations/resolve"), {
       method: "POST",
       headers: { "content-type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(body),
     });
     if (response.status === 404) {
@@ -204,6 +497,7 @@ export async function reverseLocation(body: LocationReverseRequest): Promise<Loc
     const response = await fetch(resolveUrl("/api/v1/locations/reverse"), {
       method: "POST",
       headers: { "content-type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(body),
     });
     if (response.status === 404) {

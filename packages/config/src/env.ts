@@ -17,6 +17,7 @@ export interface AppEnv {
   port?: number;
   apiPort?: number;
   corsAllowedOrigins?: string;
+  authRequired?: boolean;
   locationMatchThresholdMeters?: number;
 }
 
@@ -58,6 +59,7 @@ export function loadAppEnv(
     port: parseOptionalInt(merged.PORT) ?? parseOptionalInt(merged.API_PORT) ?? 4000,
     apiPort: parseOptionalInt(merged.API_PORT),
     corsAllowedOrigins: merged.CORS_ALLOWED_ORIGINS,
+    authRequired: parseOptionalBoolean(merged.AUTH_REQUIRED),
     locationMatchThresholdMeters: parseOptionalInt(merged.LOCATION_MATCH_THRESHOLD_METERS) ?? 10,
   };
 }

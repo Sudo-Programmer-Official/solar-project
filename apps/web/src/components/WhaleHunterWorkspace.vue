@@ -1,6 +1,6 @@
 <template>
   <main class="px-4 pb-4">
-    <MobileHeader eyebrow="WHALE HUNTER" title="Scan Around Me" subtitle="One shared search and filter system." />
+    <MobileHeader eyebrow="LABS · LEAD FINDER" title="Lead Finder" subtitle="Experimental location-based opportunity discovery." />
 
     <section class="page-surface p-4">
       <p class="field-label">Current context</p>
@@ -223,7 +223,7 @@
           <p class="mt-1 text-sm text-slate-500">More results may appear.</p>
         </div>
       </div>
-      <div v-if="hunt.isComplete && results.length > 0" class="page-surface p-4 text-center">
+      <div v-if="hunt.isTerminal && results.length > 0" class="page-surface p-4 text-center">
         <p class="text-sm font-semibold text-slate-900">{{ loadedResultsLabel }}</p>
         <p v-if="scanResultsHasMore" class="mt-1 text-sm text-slate-500">
           More leads remain in this scan.
@@ -359,7 +359,7 @@ const searchContextStore = useSearchContextStore();
 const currentLocation = useCurrentLocation();
 const { openDirections } = useLeadActions();
 const { scanResults, loading, routeLoading, scanProgress, scanResultsTotal, scanResultsHasMore, scanResultsLoading, swipeDeckLead, swipeDeckResults, swipeReviewLabel, swipeSavedCount, swipeRemainingCount } = storeToRefs(hunt);
-const isSwipeHuntMode = computed(() => router.currentRoute.value.path === "/hunt");
+const isSwipeHuntMode = computed(() => router.currentRoute.value.path === "/labs/lead-finder");
 const isMobileViewport = ref(false);
 const mobileViewMode = computed(() => (typeof route.query.view === "string" ? route.query.view : null));
 const showSwipeDeck = computed(() => isSwipeHuntMode.value && isMobileViewport.value && mobileViewMode.value !== "list");
@@ -429,10 +429,10 @@ const summaryLabel = computed(() => {
   if (scanStatus.value === "FINAL_RANKING") {
     return "Building your best leads";
   }
-  if (hunt.isComplete && strongLeadCount.value === 0) {
+  if (hunt.isTerminal && strongLeadCount.value === 0) {
     return "No leads match these filters.";
   }
-  if (!hunt.isComplete) {
+  if (!hunt.isTerminal) {
     return `${strongLeadCount.value} strong leads found so far`;
   }
   return `${strongLeadCount.value} strong leads loaded`;
@@ -462,9 +462,9 @@ const suggestedLowerCapacity = computed<12 | 15 | null>(() => {
   if (searchContextStore.filters.minimumSystemKw === 15) return 12;
   return null;
 });
-const showLoadMismatch = computed(() => hunt.isComplete && strongLeadCount.value > 0 && !scanResultsLoading.value && results.value.length === 0);
-const showZeroLeadState = computed(() => hunt.isComplete && strongLeadCount.value === 0 && !showLoadMismatch.value);
-const showClusterEmptyState = computed(() => hunt.isComplete && results.value.length > 0 && visibleResults.value.length === 0 && !showLoadMismatch.value && !showZeroLeadState.value);
+const showLoadMismatch = computed(() => hunt.isTerminal && strongLeadCount.value > 0 && !scanResultsLoading.value && results.value.length === 0);
+const showZeroLeadState = computed(() => hunt.isTerminal && strongLeadCount.value === 0 && !showLoadMismatch.value);
+const showClusterEmptyState = computed(() => hunt.isTerminal && results.value.length > 0 && visibleResults.value.length === 0 && !showLoadMismatch.value && !showZeroLeadState.value);
 const visibleResults = computed(() => {
   if (!activeClusterKey.value) return results.value;
   return results.value.filter((lead) => clusterKeyForLead(lead) === activeClusterKey.value);
@@ -752,7 +752,7 @@ async function buildRouteFromSaved() {
     return;
   }
   await hunt.generateRoute(savedLeadIds.value);
-  await router.push("/route");
+  await router.push("/labs/route");
 }
 
 async function expandRadius() {
@@ -832,7 +832,7 @@ function toggleSelected() {
 
 async function createRoute() {
   await hunt.generateRoute();
-  await router.push("/route");
+  await router.push("/labs/route");
 }
 
 function viewCluster(key: string) {
@@ -849,7 +849,7 @@ function selectPin(id: string) {
 }
 
 function clusterKeyForLead(lead: DiscoveryScanLead) {
-  return `${Math.round((lead.latitude ?? 0) * 100)}:${Math.round((lead.longitude ?? 0) * 100)}`;
+  return lead.clusterId ?? `${Math.round((lead.latitude ?? 0) * 100)}:${Math.round((lead.longitude ?? 0) * 100)}`;
 }
 
 function clusterSizeForKey(key: string) {

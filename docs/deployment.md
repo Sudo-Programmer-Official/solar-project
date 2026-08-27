@@ -1,21 +1,18 @@
 # Deployment
 
-## Production Topology
+## Production topology
+
+The MVP uses one web application, one API server, and one PostgreSQL database.
 
 ```text
-browser
-  ↓
-web frontend
-  ↓ HTTPS
-API
-  ↓
-AWS RDS
-
-API
-  ↓
-Google Geocoding
-Google Solar
+browser ── HTTPS ── apps/web ── /api ── apps/api ── PostgreSQL
+                                             ├── public
+                                             ├── sales
+                                             ├── analytics
+                                             └── field_ops
 ```
+
+The `/insights` page is part of `apps/web`; its dashboard, import, and drill-down requests are served by `apps/api`. No intelligence API, standalone intelligence web host, or worker process is required.
 
 ## Backend Environment
 
@@ -25,7 +22,8 @@ Required:
 - `GOOGLE_SOLAR_API_KEY`
 - `GOOGLE_GEOCODING_API_KEY`
 - `CORS_ALLOWED_ORIGINS`
-- `PORT`
+- `PORT` — the single API server port, normally `4000`.
+- `AUTH_REQUIRED` — leave unset in production (secure default) or set `true`; only set `false` for a deliberately local demo.
 
 Optional:
 
@@ -41,6 +39,7 @@ Optional:
 Required:
 
 - `VITE_API_BASE_URL`
+- `VITE_AUTH_REQUIRED=true` — production web builds must use the API session; the demo role variables are only a local fallback when this is explicitly `false`.
 
 Example local value:
 
@@ -51,3 +50,20 @@ Example local value:
 - The API binds to `0.0.0.0` and defaults to port `4000`.
 - The web app binds to `0.0.0.0` and defaults to port `5173`.
 - Production readiness is verified with `GET /health` and `GET /ready`.
+
+## Platform authentication
+
+Migrations `009_platform_rbac.sql`, `010_platform_auth_scope.sql`, and `011_field_operation_lifecycle.sql` create the normalized roles, permissions, sessions, invites, teams, audit tables, temporary-password state, capacity slots, canonical appointment statuses, and field activity/sync records in `field_ops`. The API owns authorization; Vue navigation guards are only presentation.
+
+Before the first production login, provision one administrator with the one-time CLI command below. It applies migrations and creates or resets the requested account without putting a password in source control:
+
+```sh
+PLATFORM_USER_EMAIL=admin@example.com \
+PLATFORM_USER_PASSWORD='use-a-12-character-secret' \
+PLATFORM_USER_FIRST_NAME=Platform \
+PLATFORM_USER_LAST_NAME=Admin \
+PLATFORM_USER_ROLES=SUPER_ADMIN \
+npm run platform:create-user
+```
+
+The Team page then handles live user creation, multi-role assignment, invites, reactivation, and deactivation. A user created with a direct password is marked temporary and must replace it on first login; invite acceptance sets the user’s permanent password. In a separately hosted web/API deployment, keep the API on HTTPS: auth cookies use `SameSite=None; Secure` and the API must list the web origin in `CORS_ALLOWED_ORIGINS`.
