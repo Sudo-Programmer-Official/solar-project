@@ -72,7 +72,8 @@
         <div v-else class="mt-4 grid gap-3">
           <article v-for="appointment in unassignedAppointments" :key="appointment.id" class="rounded-2xl border border-primary-200 bg-white p-4">
             <button class="w-full text-left" type="button" @click="openAppointment(appointment.id)"><div class="flex items-start justify-between gap-3"><div><p class="text-sm font-semibold text-slate-900">{{ leadName(appointment.leadId) }}</p><p class="mt-1 text-xs text-slate-500">{{ formatDate(appointment.scheduledStart) }} · {{ formatTime(appointment.scheduledStart) }}</p></div><span class="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-800">UNASSIGNED</span></div></button>
-            <div class="mt-3 flex gap-2"><select v-model="assignmentDraft[appointment.id]" class="min-h-touch min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 text-xs"><option value="">Assign available closer</option><option v-for="closer in availableClosers[appointment.id] ?? []" :key="closer.id" :value="closer.id">{{ closer.displayName }} · {{ closer.appointmentsToday }} today</option></select><button class="rounded-2xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50" :disabled="!assignmentDraft[appointment.id]" type="button" @click="assign(appointment)">Assign</button></div>
+            <div v-if="availableClosers[appointment.id]?.length" class="mt-3 flex gap-2"><select v-model="assignmentDraft[appointment.id]" class="min-h-touch min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 text-xs"><option value="">Assign available closer</option><option v-for="closer in availableClosers[appointment.id] ?? []" :key="closer.id" :value="closer.id">{{ closer.displayName }} · {{ closer.appointmentsToday }} today</option></select><button class="rounded-2xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50" :disabled="!assignmentDraft[appointment.id]" type="button" @click="assign(appointment)">Assign</button></div>
+            <p v-else class="mt-3 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">No eligible closer covers this appointment yet. Publish a closer availability window covering {{ formatDate(appointment.scheduledStart) }} at {{ formatTime(appointment.scheduledStart) }}, then refresh.</p>
           </article>
         </div>
       </section>
@@ -159,10 +160,7 @@ async function load() {
   leads.value = resultValue(results[2]) ?? []; appointments.value = resultValue(results[3]) ?? []; slots.value = resultValue(results[4]) ?? []; closers.value = resultValue(results[5]) ?? []; report.value = resultValue(results[6]);
   operationalSlots.value = resultValue(results[7]) ?? []; definitions.value = resultValue(results[8]) ?? [];
   for (const definition of definitions.value) { definitionDraft.value[definition.id] = definition.standardCapacity; policyDraft.value[definition.id] = definition.overflowPolicy; }
-  if (user.can("appointment:assign")) {
-    const candidates = await Promise.all(appointments.value.filter((appointment) => appointment.status === "UNASSIGNED" || (["ASSIGNED", "RESCHEDULED"].includes(appointment.status) && user.can("appointment:reassign"))).map(async (appointment) => [appointment.id, await getAvailableFieldClosers(appointment.id).catch(() => [])] as const));
-    availableClosers.value = Object.fromEntries(candidates);
-  }
+  await refreshAvailableClosers();
   if (results[2].status === "rejected" && results[3].status === "rejected") error.value = "Unable to load live field data right now.";
 }
 
@@ -190,6 +188,7 @@ async function createAvailability() {
   try {
     await createFieldAvailability({ closerId, slotStart: start.toISOString(), slotEnd: end.toISOString(), capacity: capacityNumber });
     slots.value = await getFieldAvailability();
+    await refreshAvailableClosers();
     message.value = "Closer assignment availability published.";
   } catch (cause) {
     availabilityError.value = cause instanceof Error ? cause.message : "Unable to publish availability.";
@@ -238,5 +237,10 @@ function formatDefinitionTime(value: string) { const [hourText, minute] = value.
 const selectedOperationalSlot = computed(() => operationalSlots.value.find((slot) => slot.id === selectedSlotId.value) ?? null);
 function selectOperationalSlot(id: string) { selectedSlotId.value = id; allowOverflow.value = false; }
 function resultValue<T>(result: PromiseSettledResult<T>): T | null { return result.status === "fulfilled" ? result.value : null; }
+async function refreshAvailableClosers() {
+  if (!user.can("appointment:assign")) return;
+  const candidates = await Promise.all(appointments.value.filter((appointment) => appointment.status === "UNASSIGNED" || (["ASSIGNED", "RESCHEDULED"].includes(appointment.status) && user.can("appointment:reassign"))).map(async (appointment) => [appointment.id, await getAvailableFieldClosers(appointment.id).catch(() => [])] as const));
+  availableClosers.value = Object.fromEntries(candidates);
+}
 async function refreshReport() { try { report.value = await getFieldReport(); } catch { /* The queue mutation itself succeeded; report permissions may be narrower. */ } }
 </script>

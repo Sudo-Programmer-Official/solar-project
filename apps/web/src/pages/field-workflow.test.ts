@@ -62,6 +62,9 @@ test("field operations does not use the legacy filename-only bill path", async (
   assert.doesNotMatch(source, /addFieldBill|billDraft|storage reference/);
   assert.match(source, /uploadFieldBill/);
   assert.match(source, /type=\"file\"/);
+  assert.match(source, /async function refreshAvailableClosers/);
+  assert.match(source, /await refreshAvailableClosers\(\);\n    message\.value = "Closer assignment availability published\."/);
+  assert.match(source, /No eligible closer covers this appointment yet/);
 });
 
 test("lead detail exposes audited note edits and canonical activity", async () => {
