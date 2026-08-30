@@ -235,7 +235,7 @@ function createMemoryFieldRepository(): FieldOperationsRepository {
       slot.status = slot.bookedCount >= slot.capacity ? "BOOKED" : "AVAILABLE";
       const appointment = {
         id: input.id!, leadId: input.leadId, setterId: input.setterId, closerId: null, teamId: input.teamId ?? null, scheduledStart: slot.slotStart, scheduledEnd: slot.slotEnd,
-        timezone: slot.timezone, appointmentType: input.appointmentType ?? "SOLAR_CONSULTATION", status: "UNASSIGNED" as const, outcome: null, outcomeNotes: null,
+        timezone: slot.timezone, appointmentType: input.appointmentType ?? "SOLAR_CONSULTATION", status: "UNASSIGNED" as const, outcome: null, outcomeNotes: null, availabilitySlotId: input.slotId, operationalSlotId: null, isOverflow: false, cancelReason: null, cancelledAt: null, cancelledBy: null,
         startedAt: null, completedAt: null, assignedAt: null, assignedBy: null, notes: null, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
       };
       appointments.set(appointment.id, appointment);

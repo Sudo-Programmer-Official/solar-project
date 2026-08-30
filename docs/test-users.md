@@ -16,7 +16,7 @@ To seed the accounts plus linked field-operation QA data, use:
 NODE_ENV=development ALLOW_TEST_USERS=true npm run db:seed:qa
 ```
 
-The QA seed adds five deterministic leads and four linked appointments: Lead A is an unassigned 6:30 PM appointment, Lead B is a `NO_SHOW`, Lead C is `INTERESTED` with no bill, Lead D is `CLOSED` with bill metadata, and Lead E is `FOLLOW_UP`. It also adds notes, activity records, sheet-sync jobs, and deterministic closer-capacity slots. The bill is metadata only; no file-storage service is required.
+The QA seed adds five deterministic leads and four linked appointments: Lead A is an unassigned 6:00 PM appointment, Lead B is a `NO_SHOW`, Lead C is `INTERESTED` with no bill, Lead D is `CLOSED` with bill metadata, and Lead E is `FOLLOW_UP`. It also adds notes, activity records, sheet-sync jobs, and deterministic closer-capacity slots. The bill is metadata only; no file-storage service is required.
 
 | Email | Role(s) | Development password | Primary UI |
 | --- | --- | --- | --- |

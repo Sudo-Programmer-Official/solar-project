@@ -198,9 +198,9 @@ export async function seedDemoFieldData(
   }
 
   const slots = [
-    { id: "00000000-0000-4000-8000-000000000321", closerId: closer.id, hour: 18, minute: 30 },
+    { id: "00000000-0000-4000-8000-000000000321", closerId: closer.id, hour: 18, minute: 0 },
     { id: "00000000-0000-4000-8000-000000000322", closerId: closer.id, hour: 10, minute: 0 },
-    { id: "00000000-0000-4000-8000-000000000323", closerId: closer.id, hour: 13, minute: 0 },
+    { id: "00000000-0000-4000-8000-000000000323", closerId: closer.id, hour: 14, minute: 0 },
     { id: "00000000-0000-4000-8000-000000000324", closerId: closer.id, hour: 16, minute: 0 },
   ] as const;
   for (const slot of slots) {
@@ -222,7 +222,7 @@ export async function seedDemoFieldData(
   }
 
   const appointmentDefinitions = [
-    { id: "00000000-0000-4000-8000-000000000421", leadId: leads[0].id, setterId: leads[0].setterId, slotId: slots[0].id, outcome: null, notes: "Ready for manager assignment at the 6:30 PM capacity slot." },
+    { id: "00000000-0000-4000-8000-000000000421", leadId: leads[0].id, setterId: leads[0].setterId, slotId: slots[0].id, outcome: null, notes: "Ready for manager assignment at the 6:00 PM capacity slot." },
     { id: "00000000-0000-4000-8000-000000000422", leadId: leads[1].id, setterId: leads[1].setterId, slotId: slots[1].id, outcome: "NO_SHOW" as const, notes: "Customer did not attend the consultation." },
     { id: "00000000-0000-4000-8000-000000000423", leadId: leads[3].id, setterId: leads[3].setterId, slotId: slots[2].id, outcome: "CLOSED" as const, notes: "Closed after a strong utility-bill review." },
     { id: "00000000-0000-4000-8000-000000000424", leadId: leads[4].id, setterId: leads[4].setterId, slotId: slots[3].id, outcome: "FOLLOW_UP" as const, notes: "Interested homeowner requested a follow-up call." },
@@ -253,6 +253,7 @@ export async function seedDemoFieldData(
           assignedBy: manager.id,
           teamIds: [seeded.teamId],
           allowReassign: true,
+          isTestData: true,
         });
         if (!assigned) throw new Error(`Unable to assign seeded appointment ${appointment.id}.`);
         appointment = assigned;
@@ -265,6 +266,7 @@ export async function seedDemoFieldData(
           status: definition.outcome === "NO_SHOW" ? "NO_SHOW" : "COMPLETED",
           outcome: definition.outcome,
           outcomeNotes: definition.notes,
+          isTestData: true,
         });
         if (!updated) throw new Error(`Unable to record seeded outcome for ${appointment.id}.`);
         appointment = updated;
@@ -281,7 +283,7 @@ export async function seedDemoFieldData(
 
   const interestedContext = contexts.get(leads[2].id)!;
   if (interestedContext.lead.status === "KNOCKED") {
-    await repository.updateLeadStatus({ leadId: leads[2].id, status: "INTERESTED", actorId: setter.id });
+    await repository.updateLeadStatus({ leadId: leads[2].id, status: "INTERESTED", actorId: setter.id, isTestData: true });
     contexts.set(leads[2].id, await repository.getLeadContext(leads[2].id) ?? interestedContext);
   }
 

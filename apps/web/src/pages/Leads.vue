@@ -1,7 +1,7 @@
 <template>
   <main class="px-4 pb-4">
     <MobileHeader
-      eyebrow="SolarScout"
+      eyebrow="BLACKOPS FIELD"
       title="Leads"
       subtitle="Persisted outcomes across saved, skipped, and revisit leads."
     />

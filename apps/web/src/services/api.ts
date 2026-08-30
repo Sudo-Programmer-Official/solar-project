@@ -99,6 +99,9 @@ export interface FieldAppointment {
   setterId: string | null;
   closerId: string | null;
   teamId: string | null;
+  availabilitySlotId: string | null;
+  operationalSlotId: string | null;
+  isOverflow: boolean;
   scheduledStart: string;
   scheduledEnd: string;
   timezone: string;
@@ -111,6 +114,9 @@ export interface FieldAppointment {
   assignedAt: string | null;
   assignedBy: string | null;
   notes: string | null;
+  cancelReason: string | null;
+  cancelledAt: string | null;
+  cancelledBy: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -128,12 +134,46 @@ export interface FieldAvailabilitySlot {
   note: string | null;
 }
 
+export interface FieldOperationalSlotAppointment {
+  id: string;
+  leadId: string;
+  status: string;
+  isOverflow: boolean;
+}
+
+export interface FieldOperationalSlotDefinition {
+  id: string;
+  startTime: string;
+  durationMinutes: number;
+  standardCapacity: number;
+  overflowPolicy: "ALLOW_WITH_WARNING" | "BLOCK";
+  source: string;
+  active: boolean;
+}
+
+export interface FieldOperationalSlot {
+  id: string;
+  teamId: string | null;
+  slotDate: string;
+  startTime: string;
+  slotStart: string;
+  slotEnd: string;
+  timezone: string;
+  standardCapacity: number;
+  bookedCount: number;
+  remainingCapacity: number;
+  overflowCount: number;
+  overflowPolicy: "ALLOW_WITH_WARNING" | "BLOCK";
+  status: "OPEN" | "BLOCKED";
+  appointments: FieldOperationalSlotAppointment[];
+}
+
 export interface FieldLeadContext {
   lead: FieldLead;
   appointments: FieldAppointment[];
-  notes: Array<{ id: string; leadId: string; appointmentId: string | null; authorId: string | null; kind: string; body: string | null; createdAt: string }>;
-  bills: Array<{ id: string; leadId: string; uploadedBy: string | null; storageKey: string; fileName: string; mimeType: string; fileSizeBytes: number; createdAt: string }>;
-  activities: Array<{ id: string; leadId: string; actorId: string | null; eventType: string; event: unknown; createdAt: string }>;
+  notes: Array<{ id: string; leadId: string; appointmentId: string | null; authorId: string | null; authorName: string | null; authorRole: string | null; kind: string; body: string | null; createdAt: string; updatedAt: string }>;
+  bills: Array<{ id: string; leadId: string; uploadedBy: string | null; storageKey: string; fileName: string; mimeType: string; fileSizeBytes: number; replacedBy: string | null; replacedAt: string | null; createdAt: string }>;
+  activities: Array<{ id: string; leadId: string; actorId: string | null; actorName: string | null; eventType: string; event: unknown; createdAt: string }>;
   sheetSync: { id: string; leadId: string; status: string; attempts: number; lastSyncedAt: string | null; lastError: string | null; nextAttemptAt: string | null; updatedAt: string } | null;
 }
 
@@ -143,6 +183,37 @@ export interface FieldReport {
   byStatus: Array<{ status: string; count: number }>;
   byOutcome: Array<{ outcome: string; count: number }>;
   sync: { pending: number; synced: number; failed: number };
+  capacity: { standard: number; booked: number; remaining: number; overflow: number };
+  unassignedCount: number;
+  confirmedCount: number;
+  cancelledCount: number;
+  cancellationReasons: Array<{ reason: string; count: number }>;
+}
+
+export type FieldFollowUpStatus = "OPEN" | "DONE" | "SNOOZED" | "CANCELLED" | "CONVERTED_TO_APPOINTMENT";
+export interface FieldFollowUp {
+  id: string;
+  leadId: string;
+  ownerUserId: string;
+  dueAt: string;
+  reason: string;
+  note: string;
+  status: FieldFollowUpStatus;
+  createdBy: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  updatedAt: string;
+  convertedAppointmentId: string | null;
+  homeownerName: string;
+  addressLine1: string;
+  phone: string | null;
+}
+
+export interface AvailableCloser {
+  id: string;
+  displayName: string;
+  teamIds: string[];
+  appointmentsToday: number;
 }
 
 export interface PropertyDetailPayload {
@@ -280,9 +351,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
   }
 }
 
-async function requestPlatformJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function requestPlatformJson<T>(path: string, init: RequestInit = {}, timeoutMs = 5000): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 5000);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response = await fetch(resolveUrl(path), {
       ...init,
@@ -388,12 +459,37 @@ export async function createFieldLead(input: Record<string, unknown>): Promise<F
   return response.lead;
 }
 
+export async function createFieldLeadWithAppointment(input: Record<string, unknown>, operationalSlotId: string, allowOverflow = false, appointmentType?: string): Promise<{ lead: FieldLead; appointment: FieldAppointment }> {
+  return requestPlatformJson<{ lead: FieldLead; appointment: FieldAppointment }>("/api/v1/field/leads", {
+    method: "POST",
+    body: JSON.stringify({ ...input, operationalSlotId, allowOverflow, appointmentType }),
+  });
+}
+
 export async function getFieldAvailability(from?: string, to?: string): Promise<FieldAvailabilitySlot[]> {
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
   const response = await requestPlatformJson<{ slots: FieldAvailabilitySlot[] }>(`/api/v1/field/availability${params.toString() ? `?${params}` : ""}`, { method: "GET" });
   return response.slots;
+}
+
+export async function getFieldOperationalSlots(from?: string, to?: string): Promise<FieldOperationalSlot[]> {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const response = await requestPlatformJson<{ slots: FieldOperationalSlot[] }>(`/api/v1/field/operational-slots${params.toString() ? `?${params}` : ""}`, { method: "GET" });
+  return response.slots;
+}
+
+export async function getFieldOperationalSlotDefinitions(): Promise<FieldOperationalSlotDefinition[]> {
+  const response = await requestPlatformJson<{ definitions: FieldOperationalSlotDefinition[] }>("/api/v1/field/operational-slot-definitions", { method: "GET" });
+  return response.definitions;
+}
+
+export async function updateFieldOperationalSlotDefinition(id: string, standardCapacity: number, overflowPolicy: FieldOperationalSlotDefinition["overflowPolicy"]): Promise<FieldOperationalSlotDefinition> {
+  const response = await requestPlatformJson<{ definition: FieldOperationalSlotDefinition }>(`/api/v1/field/operational-slot-definitions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ standardCapacity, overflowPolicy }) });
+  return response.definition;
 }
 
 export async function getFieldClosers(): Promise<Array<{ id: string; displayName: string; teamIds: string[] }>> {
@@ -406,9 +502,14 @@ export async function createFieldAvailability(input: Record<string, unknown>): P
   return response.slot;
 }
 
-export async function createFieldAppointment(leadId: string, slotId: string, appointmentType?: string): Promise<FieldAppointment> {
-  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/leads/${encodeURIComponent(leadId)}/appointments`, { method: "POST", body: JSON.stringify({ slotId, appointmentType }) });
+export async function createFieldAppointment(leadId: string, slotId: string, appointmentType?: string, options?: { operational?: boolean; allowOverflow?: boolean }): Promise<FieldAppointment> {
+  const body = options?.operational ? { operationalSlotId: slotId, allowOverflow: options.allowOverflow === true, appointmentType } : { slotId, appointmentType };
+  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/leads/${encodeURIComponent(leadId)}/appointments`, { method: "POST", body: JSON.stringify(body) });
   return response.appointment;
+}
+
+export async function createFieldOperationalAppointment(leadId: string, operationalSlotId: string, allowOverflow = false, appointmentType?: string): Promise<FieldAppointment> {
+  return createFieldAppointment(leadId, operationalSlotId, appointmentType, { operational: true, allowOverflow });
 }
 
 export async function getFieldAppointments(): Promise<FieldAppointment[]> {
@@ -420,8 +521,23 @@ export async function getFieldAppointment(id: string): Promise<{ context: FieldL
   return requestPlatformJson(`/api/v1/field/appointments/${encodeURIComponent(id)}`, { method: "GET" });
 }
 
+export async function getAvailableFieldClosers(id: string): Promise<AvailableCloser[]> {
+  const response = await requestPlatformJson<{ closers: AvailableCloser[] }>(`/api/v1/field/appointments/${encodeURIComponent(id)}/available-closers`, { method: "GET" });
+  return response.closers;
+}
+
 export async function assignFieldAppointment(id: string, closerId: string): Promise<FieldAppointment> {
   const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/appointments/${encodeURIComponent(id)}/assign`, { method: "POST", body: JSON.stringify({ closerId }) });
+  return response.appointment;
+}
+
+export async function cancelFieldAppointment(id: string, cancelReason: string): Promise<FieldAppointment> {
+  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/appointments/${encodeURIComponent(id)}/cancel`, { method: "POST", body: JSON.stringify({ cancelReason }) });
+  return response.appointment;
+}
+
+export async function rescheduleFieldAppointment(id: string, operationalSlotId: string, allowOverflow = false): Promise<FieldAppointment> {
+  const response = await requestPlatformJson<{ appointment: FieldAppointment }>(`/api/v1/field/appointments/${encodeURIComponent(id)}/reschedule`, { method: "POST", body: JSON.stringify({ operationalSlotId, allowOverflow }) });
   return response.appointment;
 }
 
@@ -430,16 +546,94 @@ export async function updateFieldOutcome(id: string, outcome: string, outcomeNot
   return response.appointment;
 }
 
-export async function addFieldNote(leadId: string, body: string, appointmentId?: string): Promise<void> {
-  await requestPlatformJson(`/api/v1/field/leads/${encodeURIComponent(leadId)}/notes`, { method: "POST", body: JSON.stringify({ body, appointmentId }) });
+export async function addFieldNote(leadId: string, body: string, appointmentId?: string): Promise<FieldLeadContext["notes"][number]> {
+  const response = await requestPlatformJson<{ note: FieldLeadContext["notes"][number] }>(`/api/v1/field/leads/${encodeURIComponent(leadId)}/notes`, { method: "POST", body: JSON.stringify({ body, appointmentId }) });
+  return response.note;
 }
 
-export async function addFieldBill(leadId: string, input: { storageKey: string; fileName: string; mimeType: string; fileSizeBytes: number }): Promise<void> {
-  await requestPlatformJson(`/api/v1/field/leads/${encodeURIComponent(leadId)}/bills`, { method: "POST", body: JSON.stringify(input) });
+export async function uploadFieldBill(leadId: string, file: File): Promise<void> {
+  const contentBase64 = await fileToBase64(file);
+  await requestPlatformJson(`/api/v1/field/leads/${encodeURIComponent(leadId)}/bills`, {
+    method: "POST",
+    body: JSON.stringify({ fileName: file.name, mimeType: file.type || mimeTypeFromName(file.name), contentBase64 }),
+  }, 30_000);
+}
+
+export async function getFieldBillDownloadUrl(billId: string): Promise<string> {
+  const response = await requestPlatformJson<{ download: { url: string; expiresAt: string } }>(`/api/v1/field/bills/${encodeURIComponent(billId)}/download-url`, { method: "GET" });
+  return resolveUrl(response.download.url);
+}
+
+export async function downloadFieldBill(billId: string): Promise<void> {
+  const url = await getFieldBillDownloadUrl(billId);
+  const response = await fetch(url, { credentials: "include" });
+  if (!response.ok) throw new Error("The bill could not be downloaded.");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = response.headers.get("content-disposition")?.match(/filename="?([^";]+)"?/i)?.[1] ?? "utility-bill";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+function mimeTypeFromName(fileName: string): string {
+  const extension = fileName.toLowerCase().split(".").pop();
+  return extension === "pdf" ? "application/pdf" : extension === "png" ? "image/png" : extension === "heic" ? "image/heic" : extension === "heif" ? "image/heif" : "image/jpeg";
 }
 
 export async function getFieldReport(): Promise<FieldReport> {
   return requestPlatformJson<FieldReport>("/api/v1/field/reports", { method: "GET" });
+}
+
+export async function getFieldFollowUps(): Promise<FieldFollowUp[]> {
+  const response = await requestPlatformJson<{ followUps: FieldFollowUp[] }>("/api/v1/field/follow-ups", { method: "GET" });
+  return response.followUps;
+}
+
+export async function getFieldFollowUp(id: string): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}`, { method: "GET" });
+  return response.followUp;
+}
+
+export async function createFieldFollowUp(input: { leadId: string; dueAt: string; reason: string; note?: string }): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>("/api/v1/field/follow-ups", { method: "POST", body: JSON.stringify(input) });
+  return response.followUp;
+}
+
+export async function snoozeFieldFollowUp(id: string, dueAt: string): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/snooze`, { method: "POST", body: JSON.stringify({ dueAt }) });
+  return response.followUp;
+}
+
+export async function completeFieldFollowUp(id: string): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/complete`, { method: "POST" });
+  return response.followUp;
+}
+
+export async function cancelFieldFollowUp(id: string): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  return response.followUp;
+}
+
+export async function convertFieldFollowUp(id: string, slotId: string, appointmentType?: string): Promise<{ followUp: FieldFollowUp; appointment: FieldAppointment }> {
+  return requestPlatformJson<{ followUp: FieldFollowUp; appointment: FieldAppointment }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/convert`, { method: "POST", body: JSON.stringify({ slotId, appointmentType }) });
+}
+
+export async function convertFieldFollowUpToOperationalSlot(id: string, operationalSlotId: string, allowOverflow = false, appointmentType?: string): Promise<{ followUp: FieldFollowUp; appointment: FieldAppointment }> {
+  return requestPlatformJson<{ followUp: FieldFollowUp; appointment: FieldAppointment }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/convert`, { method: "POST", body: JSON.stringify({ operationalSlotId, allowOverflow, appointmentType }) });
 }
 
 export async function getIntelligenceDashboard(): Promise<IntelligenceDashboard | null> {

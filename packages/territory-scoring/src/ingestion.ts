@@ -114,13 +114,17 @@ export function parseWorkbook(
       const customerColumn = block.fieldColumns.customerName;
       if (customerColumn == null) continue;
 
+      let activeAppointmentTime: string | null = null;
       for (let rowIndex = block.headerRow + 1; rowIndex < block.nextHeaderRow; rowIndex += 1) {
         const row = rows[rowIndex] ?? [];
+        const raw = readBlock(row, block.fieldColumns);
+        const rawTime = cleanText(raw.time);
+        const rowTime = isOverflowMarker(rawTime) ? null : normalizeTime(raw.time);
+        if (rowTime) activeAppointmentTime = rowTime;
         const customerValue = row[customerColumn];
         const customerName = cleanText(customerValue);
         if (!customerName || isNonAppointmentMarker(customerName)) continue;
         candidateRows += 1;
-        const raw = readBlock(row, block.fieldColumns);
         const city = normalizeTerritoryLabel(raw.city);
         const hood = normalizeTerritoryLabel(raw.hood);
         const street = normalizeStreetLabel(raw.street);
@@ -134,7 +138,11 @@ export function parseWorkbook(
         const displayName = normalizeDisplayName(customerName) ?? customerName;
         const setter = normalizeDisplayName(cleanText(raw.setter));
         const closer = normalizeDisplayName(cleanText(raw.closer));
-        const appointmentTime = normalizeTime(raw.time);
+        // Spreadsheet rows underneath a time, including explicit overflow
+        // rows, inherit that block's appointment time. This keeps imported
+        // appointments on the same operational slot instead of turning blank
+        // continuation rows into unrelated time-less records.
+        const appointmentTime = activeAppointmentTime;
         const dedupeKey = buildDedupeKey({
           region: normalizeRegion(region),
           appointmentDate,
@@ -434,6 +442,10 @@ function inferYearHint(filename: string, workbook: XLSX.WorkBook): number {
 
 function isNonAppointmentMarker(value: string): boolean {
   return /^(customer name|↳\s*overflow|do not fill on black|template)$/i.test(value);
+}
+
+function isOverflowMarker(value: string | null): boolean {
+  return Boolean(value && /^↳\s*overflow/i.test(value));
 }
 
 function buildDedupeKey(input: {

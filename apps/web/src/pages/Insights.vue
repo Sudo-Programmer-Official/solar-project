@@ -1,7 +1,7 @@
 <template>
   <main class="px-4 pb-4">
     <MobileHeader
-      eyebrow="SolarScout"
+      eyebrow="BLACKOPS FIELD"
       title="Insights"
       subtitle="A quick view of territory performance and where to deploy next."
     />

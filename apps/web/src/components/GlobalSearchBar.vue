@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-6xl px-3 py-2 md:px-4 md:py-3">
       <div class="grid items-center gap-2 md:hidden md:gap-3">
         <div class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-          <span class="shrink-0 text-[21px] font-semibold tracking-tight text-slate-900">SolarScout</span>
+          <span class="shrink-0 text-[18px] font-bold tracking-[0.08em] text-slate-950">BLACKOPS FIELD</span>
 
           <form class="min-w-0" @submit.prevent="searchLocation">
             <label class="relative block" for="global-search-input-mobile">
@@ -61,7 +61,7 @@
       <div class="hidden md:flex md:flex-col md:gap-3">
         <div class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-2">
-            <span class="text-lg font-semibold tracking-tight text-slate-900">SolarScout</span>
+            <span class="text-lg font-bold tracking-[0.08em] text-slate-950">BLACKOPS FIELD</span>
           </div>
           <button
             class="touch-target rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700"
@@ -412,7 +412,7 @@ async function searchLocation() {
     }
     await findBestDoors({ quiet: true });
   } catch {
-    notifyError("Unable to reach SolarScout. Please try again.");
+    notifyError("Unable to reach BlackOps Field. Please try again.");
   }
 }
 
@@ -527,7 +527,7 @@ function cloneFilters(filters: typeof searchStore.filters): typeof searchStore.f
 
 function notifyError(message: string) {
   ElNotification({
-    title: "SolarScout",
+    title: "BlackOps Field",
     message,
     type: "error",
     duration: 2600,
@@ -537,7 +537,7 @@ function notifyError(message: string) {
 
 function notifyWarning(message: string) {
   ElNotification({
-    title: "SolarScout",
+    title: "BlackOps Field",
     message,
     type: "warning",
     duration: 2600,

@@ -41,7 +41,7 @@ import {
 } from "./imagery";
 import type { SolarRepository } from "../../../packages/database/src/repository";
 import type { PlatformRepository, TeamMemberRecord } from "../../../packages/database/src/platform";
-import type { FieldOperationsRepository, FieldAppointmentOutcome, FieldAppointmentStatus } from "../../../packages/database/src/field-operations";
+import type { FieldOperationsRepository, FieldAppointmentOutcome, FieldAppointmentStatus, FieldFollowUpStatus } from "../../../packages/database/src/field-operations";
 import type { IntelligenceRepository } from "../../../packages/territory-scoring/src/index";
 import {
   PlatformAuthService,
@@ -61,6 +61,7 @@ import { PlatformRole, type PlatformPermission } from "../../../packages/contrac
 import { randomUUID } from "node:crypto";
 import { FieldOperationsService } from "./field-operations";
 import { handleIntelligenceRoute } from "./intelligence";
+import type { FieldBillStorage } from "./field-bill-storage";
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
@@ -73,6 +74,7 @@ export interface CreateServerOptions {
   corsAllowedOrigins?: string[];
   platformRepository?: PlatformRepository;
   fieldOperationsRepository?: FieldOperationsRepository;
+  fieldBillStorage?: FieldBillStorage;
   intelligenceRepository?: IntelligenceRepository;
   authRequired?: boolean;
 }
@@ -80,7 +82,7 @@ export interface CreateServerOptions {
 export function createServer(repository?: SolarRepository, options: CreateServerOptions = {}): http.Server {
   const allowedOrigins = resolveAllowedOrigins(options.corsAllowedOrigins);
   const platformAuth = options.platformRepository ? new PlatformAuthService(options.platformRepository) : null;
-  const fieldOperations = options.fieldOperationsRepository ? new FieldOperationsService(options.fieldOperationsRepository) : null;
+  const fieldOperations = options.fieldOperationsRepository ? new FieldOperationsService(options.fieldOperationsRepository, options.fieldBillStorage) : null;
   const intelligenceRepository = options.intelligenceRepository ?? null;
   const authRequired = options.authRequired ?? parseBoolean(process.env.AUTH_REQUIRED, true);
   return http.createServer(async (req, res) => {
@@ -868,20 +870,33 @@ async function handleFieldRoute(
 
   if (req.method === "POST" && path === "/api/v1/field/leads") {
     const body = await readJson(req);
-    const lead = await service.createLead(user, {
+    const leadInput = {
       propertyId: optionalString(body?.propertyId), homeownerName: requiredString(body?.homeownerName, "homeownerName"),
       phone: optionalString(body?.phone), email: optionalString(body?.email), addressLine1: requiredString(body?.addressLine1, "addressLine1"),
       city: optionalString(body?.city), state: optionalString(body?.state), postalCode: optionalString(body?.postalCode),
       latitude: optionalNumber(body?.latitude), longitude: optionalNumber(body?.longitude), utility: optionalString(body?.utility), supplier: optionalString(body?.supplier),
       approximateMonthlyBill: optionalNumber(body?.approximateMonthlyBill), qualification: body?.qualification ?? {}, teamId: optionalString(body?.teamId),
-    });
+    };
+    const operationalSlotId = optionalString(body?.operationalSlotId);
+    if (operationalSlotId) {
+      const created = await service.createLeadWithAppointment(user, {
+        ...leadInput,
+        operationalSlotId,
+        allowOverflow: body?.allowOverflow === true,
+        appointmentType: optionalString(body?.appointmentType) ?? undefined,
+      });
+      sendJson(res, 201, created, corsHeaders);
+      return;
+    }
+    const lead = await service.createLead(user, leadInput);
     sendJson(res, 201, { lead }, corsHeaders);
     return;
   }
 
-  const leadMatch = path.match(/^\/api\/v1\/field\/leads\/([^/]+)(?:\/(appointments|notes|bills|activity))?$/);
+  const leadMatch = path.match(/^\/api\/v1\/field\/leads\/([^/]+)(?:\/(appointments|notes|bills|activity)(?:\/([^/]+))?)?$/);
   const leadId = leadMatch?.[1] ? decodeURIComponent(leadMatch[1]) : null;
   const leadSubresource = leadMatch?.[2] ?? null;
+  const leadSubresourceId = leadMatch?.[3] ? decodeURIComponent(leadMatch[3]) : null;
   if (leadId && req.method === "GET" && !leadSubresource) {
     sendJson(res, 200, await service.getLead(user, leadId), corsHeaders);
     return;
@@ -892,7 +907,12 @@ async function handleFieldRoute(
   }
   if (leadId && req.method === "POST" && leadSubresource === "appointments") {
     const body = await readJson(req);
-    const appointment = await service.createAppointment(user, leadId, { slotId: requiredString(body?.slotId, "slotId"), appointmentType: optionalString(body?.appointmentType) ?? undefined });
+    const appointment = await service.createAppointment(user, leadId, {
+      slotId: optionalString(body?.slotId) ?? undefined,
+      operationalSlotId: optionalString(body?.operationalSlotId) ?? undefined,
+      allowOverflow: body?.allowOverflow === true,
+      appointmentType: optionalString(body?.appointmentType) ?? undefined,
+    });
     sendJson(res, 201, { appointment }, corsHeaders);
     return;
   }
@@ -903,12 +923,75 @@ async function handleFieldRoute(
     return;
   }
   if (leadId && req.method === "POST" && leadSubresource === "bills") {
-    const body = await readJson(req);
+    const body = await readJson(req, 15 * 1024 * 1024);
+    const content = decodeBase64(requiredString(body?.contentBase64, "contentBase64"));
     const bill = await service.addBill(user, leadId, {
-      storageKey: requiredString(body?.storageKey, "storageKey"), fileName: requiredString(body?.fileName ?? body?.originalFilename, "fileName"),
-      mimeType: requiredString(body?.mimeType ?? body?.contentType, "mimeType"), fileSizeBytes: requiredNumber(body?.fileSizeBytes ?? body?.bytes, "fileSizeBytes"),
+      fileName: requiredString(body?.fileName ?? body?.originalFilename, "fileName"),
+      mimeType: requiredString(body?.mimeType ?? body?.contentType, "mimeType"), fileSizeBytes: content.byteLength, content,
     });
     sendJson(res, 201, { bill }, corsHeaders);
+    return;
+  }
+
+  const billDownloadMatch = path.match(/^\/api\/v1\/field\/bills\/([^/]+)\/(download-url|download)$/);
+  if (billDownloadMatch?.[1] && billDownloadMatch[2] === "download-url" && req.method === "GET") {
+    sendJson(res, 200, { download: await service.createBillDownloadUrl(user, decodeURIComponent(billDownloadMatch[1])) }, corsHeaders);
+    return;
+  }
+  if (billDownloadMatch?.[1] && billDownloadMatch[2] === "download" && req.method === "GET") {
+    const downloaded = await service.downloadBill(user, decodeURIComponent(billDownloadMatch[1]), url.searchParams.get("token"));
+    res.writeHead(200, {
+      "content-type": downloaded.bill.mimeType,
+      "content-length": String(downloaded.content.byteLength),
+      "content-disposition": `inline; filename="${safeDownloadFileName(downloaded.bill.fileName)}"`,
+      "cache-control": "private, no-store, max-age=0",
+      ...corsHeaders,
+    });
+    res.end(downloaded.content);
+    return;
+  }
+
+  if (req.method === "GET" && path === "/api/v1/field/follow-ups") {
+    sendJson(res, 200, { followUps: await service.listFollowUps(user) }, corsHeaders);
+    return;
+  }
+  if (req.method === "POST" && path === "/api/v1/field/follow-ups") {
+    const body = await readJson(req);
+    const followUp = await service.createFollowUp(user, requiredString(body?.leadId, "leadId"), {
+      dueAt: requiredString(body?.dueAt, "dueAt"),
+      reason: requiredString(body?.reason, "reason"),
+      note: optionalString(body?.note) ?? undefined,
+    });
+    sendJson(res, 201, { followUp }, corsHeaders);
+    return;
+  }
+  const followUpMatch = path.match(/^\/api\/v1\/field\/follow-ups\/([^/]+)(?:\/(snooze|complete|cancel|convert))?$/);
+  const followUpId = followUpMatch?.[1] ? decodeURIComponent(followUpMatch[1]) : null;
+  const followUpAction = followUpMatch?.[2] ?? null;
+  if (followUpId && req.method === "GET" && !followUpAction) {
+    sendJson(res, 200, { followUp: await service.getFollowUp(user, followUpId) }, corsHeaders);
+    return;
+  }
+  if (followUpId && req.method === "POST" && followUpAction === "snooze") {
+    const body = await readJson(req);
+    const followUp = await service.updateFollowUp(user, followUpId, { status: "SNOOZED", dueAt: requiredString(body?.dueAt, "dueAt") });
+    sendJson(res, 200, { followUp }, corsHeaders);
+    return;
+  }
+  if (followUpId && req.method === "POST" && (followUpAction === "complete" || followUpAction === "cancel")) {
+    const status: FieldFollowUpStatus = followUpAction === "complete" ? "DONE" : "CANCELLED";
+    const followUp = await service.updateFollowUp(user, followUpId, { status });
+    sendJson(res, 200, { followUp }, corsHeaders);
+    return;
+  }
+  if (followUpId && req.method === "POST" && followUpAction === "convert") {
+    const body = await readJson(req);
+    const converted = await service.convertFollowUp(user, followUpId, {
+      slotId: optionalString(body?.slotId) ?? undefined,
+      operationalSlotId: optionalString(body?.operationalSlotId) ?? undefined,
+      allowOverflow: body?.allowOverflow === true,
+    }, optionalString(body?.appointmentType) ?? undefined);
+    sendJson(res, 200, converted, corsHeaders);
     return;
   }
 
@@ -916,6 +999,23 @@ async function handleFieldRoute(
     const from = url.searchParams.get("from") ?? startOfToday();
     const to = url.searchParams.get("to") ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
     sendJson(res, 200, { slots: await service.listAvailability(user, from, to) }, corsHeaders);
+    return;
+  }
+  if (req.method === "GET" && path === "/api/v1/field/operational-slots") {
+    const from = url.searchParams.get("from") ?? startOfToday();
+    const to = url.searchParams.get("to") ?? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    sendJson(res, 200, { slots: await service.listOperationalSlots(user, from, to) }, corsHeaders);
+    return;
+  }
+  if (req.method === "GET" && path === "/api/v1/field/operational-slot-definitions") {
+    sendJson(res, 200, { definitions: await service.listOperationalSlotDefinitions(user) }, corsHeaders);
+    return;
+  }
+  const slotDefinitionMatch = path.match(/^\/api\/v1\/field\/operational-slot-definitions\/([^/]+)$/);
+  if (slotDefinitionMatch?.[1] && req.method === "PATCH") {
+    const body = await readJson(req);
+    const definition = await service.updateOperationalSlotDefinition(user, decodeURIComponent(slotDefinitionMatch[1]), requiredNumber(body?.standardCapacity, "standardCapacity"), parseOverflowPolicy(body?.overflowPolicy));
+    sendJson(res, 200, { definition }, corsHeaders);
     return;
   }
   if (req.method === "GET" && path === "/api/v1/field/closers") {
@@ -936,11 +1036,15 @@ async function handleFieldRoute(
     sendJson(res, 200, { appointments: await service.listAppointments(user) }, corsHeaders);
     return;
   }
-  const appointmentMatch = path.match(/^\/api\/v1\/field\/appointments\/([^/]+)(?:\/(assign|outcome))?$/);
+  const appointmentMatch = path.match(/^\/api\/v1\/field\/appointments\/([^/]+)(?:\/(assign|outcome|available-closers|cancel|reschedule))?$/);
   const appointmentId = appointmentMatch?.[1] ? decodeURIComponent(appointmentMatch[1]) : null;
   const appointmentAction = appointmentMatch?.[2] ?? null;
   if (appointmentId && req.method === "GET" && !appointmentAction) {
     sendJson(res, 200, await service.getAppointment(user, appointmentId), corsHeaders);
+    return;
+  }
+  if (appointmentId && req.method === "GET" && appointmentAction === "available-closers") {
+    sendJson(res, 200, { closers: await service.listAvailableClosers(user, appointmentId) }, corsHeaders);
     return;
   }
   if (appointmentId && req.method === "POST" && appointmentAction === "assign") {
@@ -954,6 +1058,18 @@ async function handleFieldRoute(
     const outcome = parseAppointmentOutcome(body?.outcome);
     const status = body?.status === undefined ? undefined : parseAppointmentStatus(body.status);
     const appointment = await service.recordOutcome(user, appointmentId, { outcome, status, outcomeNotes: optionalString(body?.outcomeNotes) });
+    sendJson(res, 200, { appointment }, corsHeaders);
+    return;
+  }
+  if (appointmentId && req.method === "POST" && appointmentAction === "cancel") {
+    const body = await readJson(req);
+    const appointment = await service.cancelAppointment(user, appointmentId, requiredString(body?.cancelReason, "cancelReason"));
+    sendJson(res, 200, { appointment }, corsHeaders);
+    return;
+  }
+  if (appointmentId && req.method === "POST" && appointmentAction === "reschedule") {
+    const body = await readJson(req);
+    const appointment = await service.rescheduleAppointment(user, appointmentId, requiredString(body?.operationalSlotId, "operationalSlotId"), body?.allowOverflow === true);
     sendJson(res, 200, { appointment }, corsHeaders);
     return;
   }
@@ -1093,8 +1209,27 @@ function requiredNumber(value: unknown, field: string): number {
   return number;
 }
 
+function parseOverflowPolicy(value: unknown): "ALLOW_WITH_WARNING" | "BLOCK" {
+  if (value === "ALLOW_WITH_WARNING" || value === "BLOCK") return value;
+  throw new PlatformHttpError(400, "overflowPolicy must be ALLOW_WITH_WARNING or BLOCK.", "VALIDATION_FAILED");
+}
+
+function decodeBase64(value: string): Buffer {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
+    throw new PlatformHttpError(400, "The uploaded bill is not valid.", "BILL_CONTENT_INVALID");
+  }
+  const content = Buffer.from(value, "base64");
+  if (content.length === 0) throw new PlatformHttpError(400, "The uploaded bill is empty.", "BILL_CONTENT_INVALID");
+  return content;
+}
+
+function safeDownloadFileName(value: string): string {
+  const name = value.replace(/[\\/\r\n"]+/g, "_").trim();
+  return name || "utility-bill";
+}
+
 function parseAppointmentOutcome(value: unknown): FieldAppointmentOutcome {
-  const allowed: FieldAppointmentOutcome[] = ["NO_SHOW", "SAT", "PROPOSAL", "CLOSED", "FOLLOW_UP", "NOT_QUALIFIED", "NOT_INTERESTED", "CANCELLED"];
+  const allowed: FieldAppointmentOutcome[] = ["CLOSED", "SAT_NOT_CLOSED", "DID_NOT_SIT", "CREDIT_FAIL", "NO_SHOW", "NOT_QUALIFIED", "FOLLOW_UP", "RESCHEDULED", "CANCELLED"];
   if (typeof value !== "string" || !allowed.includes(value as FieldAppointmentOutcome)) throw new PlatformHttpError(400, "outcome is invalid.", "VALIDATION_FAILED");
   return value as FieldAppointmentOutcome;
 }
@@ -1148,11 +1283,24 @@ function normalizeConfirmationAnswer(value: unknown): "YES" | "NO" | "UNKNOWN" |
   return undefined;
 }
 
-function readJson(req: http.IncomingMessage): Promise<any> {
+function readJson(req: http.IncomingMessage, maxBytes = 1024 * 1024): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    let bytes = 0;
+    let tooLarge = false;
+    req.on("data", (chunk) => {
+      const buffer = Buffer.from(chunk);
+      bytes += buffer.byteLength;
+      if (bytes > maxBytes) {
+        tooLarge = true;
+        reject(new PlatformHttpError(413, "Request body is too large.", "REQUEST_TOO_LARGE"));
+        req.destroy();
+        return;
+      }
+      chunks.push(buffer);
+    });
     req.on("end", () => {
+      if (tooLarge) return;
       const raw = Buffer.concat(chunks).toString("utf8") || "{}";
       try {
         resolve(JSON.parse(raw));
@@ -1209,6 +1357,7 @@ if (process.argv[1]?.endsWith("server.ts") || process.argv[1]?.endsWith("server.
         corsAllowedOrigins: parseCorsOrigins(context.env.corsAllowedOrigins),
         platformRepository: context.platformRepository,
         fieldOperationsRepository: context.fieldOperationsRepository,
+        fieldBillStorage: context.fieldBillStorage,
         intelligenceRepository: context.intelligenceRepository,
         authRequired: context.env.authRequired ?? parseBoolean(process.env.AUTH_REQUIRED, true),
       });

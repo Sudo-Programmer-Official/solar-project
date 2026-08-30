@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import XLSX from "xlsx";
 import type { NormalizedAppointment } from "@solar/analytics-contracts";
 import { buildDashboard, buildTerritoryDrilldown, deduplicateAppointments, normalizeResult, parseWorkbook } from "./index";
 
@@ -32,6 +33,23 @@ test("normalizes outcome variants and removes duplicate schedule rows", () => {
   assert.equal(result.appointments.length, 2);
   assert.equal(result.duplicateRows, 1);
   assert.equal(result.appointments.some((item) => item.closerNotes === "signed docs"), true);
+});
+
+test("inherits a time block across blank and overflow spreadsheet rows", () => {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ["Monday · Mon 08/31"],
+    ["Time", "Customer Name", "Phone #"],
+    ["2:00 PM", "Sarah & Dave", "724-555-0101"],
+    [null, "Sierra Lockhart", "724-555-0102"],
+    ["↳ overflow", "Homeowner #3", "724-555-0103"],
+    ["4:00 PM", "Taylor Smith", "724-555-0104"],
+  ]);
+  XLSX.utils.book_append_sheet(workbook, sheet, "Week 1");
+
+  const result = parseWorkbook(XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }), "schedule 2026.xlsx");
+  assert.deepEqual(result.appointments.map((appointment) => appointment.appointmentTime), ["2:00 PM", "2:00 PM", "2:00 PM", "4:00 PM"]);
+  assert.equal(result.appointments.every((appointment) => appointment.appointmentDate === "2026-08-31"), true);
 });
 
 test("dashboard metrics, momentum, rankings, and trace ids are deterministic", () => {

@@ -1,6 +1,6 @@
 <template>
   <main class="px-4 pb-6">
-    <MobileHeader eyebrow="SolarScout" title="Property Detail" subtitle="Verify the house before you knock.">
+    <MobileHeader eyebrow="BLACKOPS FIELD" title="Property Detail" subtitle="Verify the house before you knock.">
       <template #action>
         <button class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold tracking-[0.08em] text-slate-700 shadow-sm" @click="reload">
           Reload

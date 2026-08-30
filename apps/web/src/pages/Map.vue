@@ -1,6 +1,6 @@
 <template>
   <main class="px-3 pb-4 sm:px-4">
-    <MobileHeader eyebrow="SOLARSCOUT · OPPORTUNITY ROUTE" title="Hood Navigator" subtitle="Plan the pocket before you knock the first door.">
+    <MobileHeader eyebrow="BLACKOPS FIELD · OPPORTUNITY ROUTE" title="Hood Navigator" subtitle="Plan the pocket before you knock the first door.">
       <template #action>
         <button class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm" type="button" @click="goToHunt">
           Hunt results

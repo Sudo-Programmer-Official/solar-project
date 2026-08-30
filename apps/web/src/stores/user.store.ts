@@ -30,6 +30,7 @@ export const useUserStore = defineStore("user", () => {
   const roles = ref<PlatformUserContext["roles"]>(readConfiguredRoles());
   const role = computed(() => primaryRole(roles.value));
   const displayName = ref(import.meta.env.VITE_DEMO_USER_NAME || "Solar operator");
+  const email = ref(import.meta.env.VITE_DEMO_USER_EMAIL || "");
   const featureFlags = ref<PlatformFeatureFlags>(readFeatureFlags());
   const remotePermissions = ref<readonly PlatformPermission[] | readonly ["*"] | null>(null);
   const remoteModules = ref<readonly PlatformModule[] | null>(null);
@@ -141,6 +142,7 @@ export const useUserStore = defineStore("user", () => {
   function applyAuthUser(user: PlatformAuthUser): void {
     id.value = user.id;
     displayName.value = user.displayName;
+    email.value = user.email;
     roles.value = user.roles;
     remotePermissions.value = user.permissions;
     teamIds.value = user.teamIds;
@@ -158,6 +160,7 @@ export const useUserStore = defineStore("user", () => {
     role,
     roleLabel,
     displayName,
+    email,
     permissions,
     modules,
     primaryLandingPath,

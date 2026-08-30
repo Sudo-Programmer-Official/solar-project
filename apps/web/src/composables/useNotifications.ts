@@ -14,15 +14,15 @@ export function useNotifications() {
   }
 
   function notifyError(message: string) {
-    notify("SolarScout", message, "error");
+    notify("BlackOps Field", message, "error");
   }
 
   function notifyWarning(message: string) {
-    notify("SolarScout", message, "warning");
+    notify("BlackOps Field", message, "warning");
   }
 
   function notifySuccess(message: string) {
-    notify("SolarScout", message, "success");
+    notify("BlackOps Field", message, "success");
   }
 
   return {

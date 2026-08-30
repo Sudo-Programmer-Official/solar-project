@@ -24,7 +24,7 @@ Every rollup stores the appointment UUIDs that contributed to it. The API also e
 
 The API imports `.xlsx` files through `POST /api/v1/intelligence/uploads` as multipart field `file` with `?region=EAST|WEST`. Parsing, deduplication, persistence, and analytics rebuild run inline in the single API process; there is no worker deployment.
 
-The parser detects repeated `Time` / `Customer Name` blocks rather than assuming a fixed 7-day width. It handles overflow rows, `Bill?` column variants, text and Excel-date headers, template sheets, and workbook week labels. West sheets with weekday-only headers inherit their week date from an explicit dated week in the same workbook.
+The parser detects repeated `Time` / `Customer Name` blocks rather than assuming a fixed 7-day width. It handles overflow rows, inherits a time across blank continuation rows in the same block, handles `Bill?` column variants, text and Excel-date headers, template sheets, and workbook week labels. West sheets with weekday-only headers inherit their week date from an explicit dated week in the same workbook.
 
 The source workbooks do not contain dedicated street, hood/neighborhood, or coordinate fields. Those fields stay nullable until a trusted address/property source is introduced; city remains the first-level territory key rather than inventing a neighborhood from free-text notes. The dashboard supports the full city → hood → street hierarchy as soon as those fields arrive.
 

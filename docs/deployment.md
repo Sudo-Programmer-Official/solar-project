@@ -33,6 +33,12 @@ Optional:
 - `DATABASE_USER`
 - `DATABASE_PASSWORD`
 - `DATABASE_SSL`
+- `OBJECT_STORAGE_ENDPOINT`
+- `OBJECT_STORAGE_BUCKET`
+- `OBJECT_STORAGE_ACCESS_KEY`
+- `OBJECT_STORAGE_SECRET_KEY`
+- `OBJECT_STORAGE_REGION` — defaults to `us-east-1`.
+- `FIELD_BILL_SIGNING_SECRET` — a long, private secret used for five-minute bill links.
 
 ## Frontend Environment
 
@@ -51,9 +57,21 @@ Example local value:
 - The web app binds to `0.0.0.0` and defaults to port `5173`.
 - Production readiness is verified with `GET /health` and `GET /ready`.
 
+## Private field-bill storage
+
+Production requires an S3-compatible private bucket configured with all four
+`OBJECT_STORAGE_*` values above. The API stores only an opaque object key in
+PostgreSQL and never exposes a permanent public URL. An authorized user first
+requests a five-minute signed download URL; the download endpoint still checks
+the authenticated user's lead and bill permissions.
+
+For local development, the API uses `.data/field-bills` unless
+`FIELD_BILL_STORAGE_DIR` is set. That directory is intentionally ignored by
+Git and is not a production storage option.
+
 ## Platform authentication
 
-Migrations `009_platform_rbac.sql`, `010_platform_auth_scope.sql`, and `011_field_operation_lifecycle.sql` create the normalized roles, permissions, sessions, invites, teams, audit tables, temporary-password state, capacity slots, canonical appointment statuses, and field activity/sync records in `field_ops`. The API owns authorization; Vue navigation guards are only presentation.
+Migrations `009_platform_rbac.sql`, `010_platform_auth_scope.sql`, `011_field_operation_lifecycle.sql`, and `016_operational_slots.sql` create the normalized roles, permissions, sessions, invites, teams, audit tables, temporary-password state, closer availability, canonical appointment statuses, fixed operational slot definitions, and field activity/sync records in `field_ops`. Operational capacity is configured per fixed time by managers and is independent from closer availability. The API owns authorization; Vue navigation guards are only presentation.
 
 Before the first production login, provision one administrator with the one-time CLI command below. It applies migrations and creates or resets the requested account without putting a password in source control:
 

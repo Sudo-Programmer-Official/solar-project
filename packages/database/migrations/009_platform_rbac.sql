@@ -69,6 +69,8 @@ VALUES
   ('appointment:assign', 'Assign appointments', 'Assign an unassigned appointment to a closer.'),
   ('appointment:reassign', 'Reassign appointments', 'Move an appointment between closers.'),
   ('appointment:update-outcome', 'Update appointment outcomes', 'Record sit, proposal, close, follow-up, or no-show outcomes.'),
+  ('appointment:cancel', 'Cancel appointments', 'Cancel an appointment while preserving its history and reason.'),
+  ('appointment:reschedule', 'Reschedule appointments', 'Move an appointment to another operational slot while preserving its identity.'),
   ('bill:upload', 'Upload bills', 'Upload a homeowner bill.'),
   ('bill:view-assigned', 'View assigned bills', 'View bills attached to assigned work.'),
   ('bill:view-all', 'View all bills', 'View bills across the company.'),

@@ -61,10 +61,35 @@ test("QA cleanup deletes only marked field data in dependency order", async () =
     activities: 1,
     sheetSyncJobs: 1,
     availabilitySlots: 1,
+    followUps: 1,
   });
   assert.deepEqual(statements.map((statement) => statement.match(/field_ops\.([a-z_]+)/)?.[1]), [
-    "sheet_sync_jobs", "activities", "bill_attachments", "notes", "appointments", "leads", "closer_availability",
+    "sheet_sync_jobs", "activities", "bill_attachments", "notes", "follow_ups", "appointments", "operational_slots", "leads", "closer_availability",
   ]);
-  assert.ok(statements.every((statement) => statement.includes("is_test_data = TRUE")));
+  assert.ok(statements.filter((statement) => statement.startsWith("DELETE")).every((statement) => statement.includes("is_test_data = TRUE")));
   assert.doesNotMatch(statements.join("\n"), /field_ops\.(users|roles|permissions|user_roles|role_permissions|teams|user_teams)/);
+});
+
+test("atomic lead and appointment creation revalidates capacity before inserting the lead", async () => {
+  const statements: string[] = [];
+  const client: SqlClient = {
+    async query<T>(sql: string) {
+      statements.push(sql);
+      return { rows: [] as T[] };
+    },
+  };
+
+  const created = await new PostgresFieldOperationsRepository(client).createLeadWithAppointment({
+    operationalSlotId: "slot-1",
+    setterId: "setter-1",
+    createdByUserId: "setter-1",
+    homeownerName: "Jordan Miller",
+    addressLine1: "1 Sun Street",
+  });
+
+  assert.equal(created, null);
+  assert.equal(statements.length, 1);
+  assert.match(statements[0] ?? "", /UPDATE field_ops\.operational_slots/);
+  assert.match(statements[0] ?? "", /booked_count < standard_capacity/);
+  assert.doesNotMatch(statements.join("\n"), /INSERT INTO field_ops\.leads/);
 });

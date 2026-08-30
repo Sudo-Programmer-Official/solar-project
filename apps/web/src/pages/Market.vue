@@ -1,6 +1,6 @@
 <template>
   <main class="px-4 pb-4">
-    <MobileHeader eyebrow="SolarScout" title="Market" subtitle="Where should our sales team work next?">
+    <MobileHeader eyebrow="BLACKOPS FIELD" title="Market" subtitle="Where should our sales team work next?">
       <template #action>
         <DataQualityBadge label="Demo data" tone="warn" />
       </template>

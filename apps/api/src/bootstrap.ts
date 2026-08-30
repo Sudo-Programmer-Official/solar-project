@@ -16,6 +16,7 @@ import {
   PostgresIntelligenceRepository,
   type IntelligenceRepository,
 } from "../../../packages/territory-scoring/src/index";
+import { createFieldBillStorage, type FieldBillStorage } from "./field-bill-storage";
 
 const expectedTables = [
   "properties",
@@ -43,7 +44,10 @@ const expectedPlatformTables = [
   "user_teams",
   "leads",
   "closer_availability",
+  "operational_slot_definitions",
+  "operational_slots",
   "appointments",
+  "follow_ups",
   "notes",
   "bill_attachments",
   "activities",
@@ -63,6 +67,7 @@ export interface ApiBootstrapContext {
   repository: SolarRepository;
   platformRepository: PlatformRepository;
   fieldOperationsRepository: FieldOperationsRepository;
+  fieldBillStorage: FieldBillStorage;
   intelligenceRepository: IntelligenceRepository;
   readyCheck: () => Promise<void>;
   close: () => Promise<void>;
@@ -89,6 +94,7 @@ export async function createApiBootstrapContext(options: ApiBootstrapOptions = {
   const platformRepository = new PostgresPlatformRepository(wrapPool(pool));
   const fieldOperationsRepository = new PostgresFieldOperationsRepository(wrapPool(pool));
   const intelligenceRepository = new PostgresIntelligenceRepository(wrapPool(pool));
+  const fieldBillStorage = createFieldBillStorage();
   const readyCheck = createDatabaseReadinessChecker(pool);
 
   if (options.applyMigrations) {
@@ -102,6 +108,7 @@ export async function createApiBootstrapContext(options: ApiBootstrapOptions = {
     repository,
     platformRepository,
     fieldOperationsRepository,
+    fieldBillStorage,
     intelligenceRepository,
     readyCheck,
     close: async () => {

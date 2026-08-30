@@ -1126,7 +1126,14 @@ export type PlatformPermission =
   | "appointment:assign"
   | "appointment:reassign"
   | "appointment:update-outcome"
+  | "appointment:cancel"
+  | "appointment:reschedule"
+  | "followup:create"
+  | "followup:view-own"
+  | "followup:view-team"
+  | "followup:update-own"
   | "bill:upload"
+  | "bill:view-own"
   | "bill:view-assigned"
   | "bill:view-all"
   | "team:view"
@@ -1159,6 +1166,7 @@ export type PlatformModule =
   | "OVERVIEW"
   | "HOME"
   | "APPOINTMENTS"
+  | "FOLLOW_UPS"
   | "OPERATIONS"
   | "LEADS"
   | "SCHEDULE"
@@ -1186,8 +1194,9 @@ export interface PlatformModuleDefinition {
 
 export const PLATFORM_MODULE_REGISTRY: readonly PlatformModuleDefinition[] = [
   { id: "OVERVIEW", label: "Overview", route: "/overview", permission: "system:manage" },
-  { id: "HOME", label: "Home", route: "/home", anyPermissions: ["lead:create", "lead:view-own", "lead:view-assigned", "lead:view-team", "lead:view-all"] },
-  { id: "APPOINTMENTS", label: "Appointments", route: "/appointments", anyPermissions: ["appointment:view-assigned", "appointment:view-team"] },
+  { id: "HOME", label: "Home", route: "/home", anyPermissions: ["lead:create", "lead:view-own", "lead:view-team", "lead:view-all"] },
+  { id: "APPOINTMENTS", label: "Appointments", route: "/appointments", anyPermissions: ["appointment:view-own", "appointment:view-assigned", "appointment:view-team"] },
+  { id: "FOLLOW_UPS", label: "Follow-ups", route: "/follow-ups", anyPermissions: ["followup:create", "followup:view-own", "followup:view-team"] },
   { id: "OPERATIONS", label: "Operations", route: "/operations", anyPermissions: ["team:view", "appointment:assign"] },
   { id: "LEADS", label: "Leads", route: "/leads", anyPermissions: ["lead:view-own", "lead:view-assigned", "lead:view-team", "lead:view-all"] },
   { id: "SCHEDULE", label: "Schedule", route: "/schedule", anyPermissions: ["appointment:create", "appointment:view-own", "appointment:view-assigned", "appointment:view-team"] },
@@ -1223,7 +1232,7 @@ export function resolvePlatformModules(
 }
 
 export function primaryPlatformRoute(modules: readonly PlatformModule[]): string {
-  const priority: readonly PlatformModule[] = ["OVERVIEW", "OPERATIONS", "APPOINTMENTS", "HOME"];
+  const priority: readonly PlatformModule[] = ["OVERVIEW", "OPERATIONS", "HOME", "APPOINTMENTS"];
   const preferred = priority.find((module) => modules.includes(module));
   if (preferred) return PLATFORM_MODULE_REGISTRY.find((module) => module.id === preferred)?.route ?? "/home";
   return PLATFORM_MODULE_REGISTRY.find((module) => modules.includes(module.id) && module.id !== "MORE")?.route ?? "/more";
@@ -1246,6 +1255,10 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPe
     "appointment:view-team",
     "appointment:assign",
     "appointment:reassign",
+    "appointment:cancel",
+    "appointment:reschedule",
+    "bill:view-all",
+    "followup:view-team",
     "team:view",
     "team:create-user",
     "team:update-user",
@@ -1264,6 +1277,10 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPe
     "appointment:assign",
     "appointment:reassign",
     "appointment:update-outcome",
+    "appointment:cancel",
+    "appointment:reschedule",
+    "bill:view-all",
+    "followup:view-team",
     "team:view",
     "team:create-user",
     "team:update-user",
@@ -1279,7 +1296,13 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPe
     "lead:update-own",
     "appointment:create",
     "appointment:view-own",
+    "appointment:cancel",
+    "appointment:reschedule",
+    "followup:create",
+    "followup:view-own",
+    "followup:update-own",
     "bill:upload",
+    "bill:view-own",
     "reports:view-own",
   ],
   CLOSER: [
@@ -1287,7 +1310,11 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPe
     "lead:view-assigned",
     "appointment:view-assigned",
     "appointment:update-outcome",
-    "bill:upload",
+    "appointment:cancel",
+    "appointment:reschedule",
+    "followup:create",
+    "followup:view-own",
+    "followup:update-own",
     "bill:view-assigned",
     "reports:view-own",
   ],

@@ -1,6 +1,6 @@
 <template>
   <main class="px-4 pb-4">
-    <MobileHeader eyebrow="SolarScout" title="Discover" subtitle="Ranked neighborhoods and ranked properties." >
+    <MobileHeader eyebrow="BLACKOPS FIELD" title="Discover" subtitle="Ranked neighborhoods and ranked properties." >
       <template #action>
         <DataQualityBadge :label="loading ? 'Loading' : 'Ready'" :tone="loading ? 'warn' : 'good'" />
       </template>

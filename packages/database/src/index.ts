@@ -4,3 +4,4 @@ export * from "./postgres";
 export * from "./migrations";
 export * from "./platform";
 export * from "./field-operations";
+export * from "./operational-slots";

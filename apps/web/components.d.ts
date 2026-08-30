@@ -8,6 +8,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BlackOpsMark: typeof import('./src/components/BlackOpsMark.vue')['default']
     BottomNavigation: typeof import('./src/components/BottomNavigation.vue')['default']
     ConfidenceBadge: typeof import('./src/components/ConfidenceBadge.vue')['default']
     DataQualityBadge: typeof import('./src/components/DataQualityBadge.vue')['default']
@@ -23,6 +24,7 @@ declare module 'vue' {
     LocationMatchBadge: typeof import('./src/components/LocationMatchBadge.vue')['default']
     MobileHeader: typeof import('./src/components/MobileHeader.vue')['default']
     NextBestAction: typeof import('./src/components/NextBestAction.vue')['default']
+    OperationalSlotPicker: typeof import('./src/components/OperationalSlotPicker.vue')['default']
     OpportunityRouteMap: typeof import('./src/components/OpportunityRouteMap.vue')['default']
     OpportunityScore: typeof import('./src/components/OpportunityScore.vue')['default']
     PropertyVisual: typeof import('./src/components/PropertyVisual.vue')['default']
