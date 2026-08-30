@@ -42,12 +42,22 @@
 
       <section v-if="user.can('appointment:assign')" class="page-surface mt-4 p-4">
         <div class="flex items-start justify-between gap-3"><div><p class="field-label text-primary-600">CLOSER ASSIGNMENT AVAILABILITY</p><h2 class="mt-1 text-lg font-semibold text-slate-900">Add closer availability</h2></div><button class="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600" type="button" @click="load">Refresh</button></div>
-        <form class="mt-4 grid gap-2 sm:grid-cols-2" @submit.prevent="createAvailability">
-          <select v-model="availabilityDraft.closerId" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3 text-sm" required><option value="">Select closer</option><option v-for="closer in closers" :key="closer.id" :value="closer.id">{{ closer.displayName }}</option></select>
-          <input v-model="availabilityDraft.capacity" class="min-h-touch rounded-2xl border border-slate-200 px-3 text-sm" min="1" placeholder="Capacity" type="number" />
-          <input v-model="availabilityDraft.slotStart" class="min-h-touch rounded-2xl border border-slate-200 px-3 text-sm" type="datetime-local" required />
-          <input v-model="availabilityDraft.slotEnd" class="min-h-touch rounded-2xl border border-slate-200 px-3 text-sm" type="datetime-local" required />
-          <button class="touch-target rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 sm:col-span-2" type="submit">Publish availability</button>
+        <form class="mt-4 grid min-w-0 gap-3 sm:grid-cols-2" novalidate @submit.prevent="createAvailability">
+          <label class="grid min-w-0 gap-1 text-xs font-semibold text-slate-600 sm:col-span-2">Closer
+            <select v-model="availabilityDraft.closerId" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900" required @input="availabilityError = ''"><option value="">Select closer</option><option v-for="closer in closers" :key="closer.id" :value="closer.id">{{ closer.displayName }}</option></select>
+          </label>
+          <label class="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">Capacity
+            <input v-model="availabilityDraft.capacity" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 px-3 text-sm font-normal text-slate-900" min="1" max="100" type="number" @input="availabilityError = ''" />
+          </label>
+          <p class="self-end pb-2 text-xs text-slate-500">One availability window per closer and start time.</p>
+          <label class="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">Starts
+            <input v-model="availabilityDraft.slotStart" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 px-3 text-sm font-normal text-slate-900" type="datetime-local" required @input="availabilityError = ''" />
+          </label>
+          <label class="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">Ends
+            <input v-model="availabilityDraft.slotEnd" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 px-3 text-sm font-normal text-slate-900" type="datetime-local" required @input="availabilityError = ''" />
+          </label>
+          <p v-if="availabilityError" class="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:col-span-2" role="alert">{{ availabilityError }}</p>
+          <button class="touch-target rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-50 sm:col-span-2" :disabled="availabilitySaving" type="submit">{{ availabilitySaving ? "Publishing…" : "Publish availability" }}</button>
         </form>
       </section>
 
@@ -130,6 +140,8 @@ const selectedBillFile = ref<File | null>(null);
 const error = ref("");
 const message = ref("");
 const saving = ref(false);
+const availabilitySaving = ref(false);
+const availabilityError = ref("");
 const leadDraft = ref({ homeownerName: "", phone: "", email: "", addressLine1: "", city: "", state: "", postalCode: "" });
 const availabilityDraft = ref({ closerId: "", slotStart: "", slotEnd: "", capacity: "1" });
 const outcomes = ["CLOSED", "SAT_NOT_CLOSED", "DID_NOT_SIT", "CREDIT_FAIL", "NO_SHOW", "NOT_QUALIFIED", "FOLLOW_UP", "RESCHEDULED", "CANCELLED"];
@@ -156,7 +168,35 @@ async function load() {
 
 async function createLead() { saving.value = true; error.value = ""; try { const lead = await createFieldLead(leadDraft.value); leads.value = [lead, ...leads.value]; selectedLeadId.value = lead.id; selectedSlotId.value = ""; operationalSlots.value = await getFieldOperationalSlots(); message.value = "Lead saved. Choose an operational slot to create its UNASSIGNED appointment."; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create the lead."; } finally { saving.value = false; } }
 async function bookAppointment() { if (!selectedLeadId.value || !selectedSlotId.value) return; saving.value = true; try { const appointment = await createFieldOperationalAppointment(selectedLeadId.value, selectedSlotId.value, allowOverflow.value); appointments.value = [appointment, ...appointments.value]; leads.value = leads.value.map((lead) => lead.id === selectedLeadId.value ? { ...lead, status: "APPOINTMENT_SET" } : lead); operationalSlots.value = await getFieldOperationalSlots(); await refreshReport(); message.value = "Appointment created as UNASSIGNED."; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create the appointment."; } finally { saving.value = false; } }
-async function createAvailability() { try { await createFieldAvailability({ closerId: availabilityDraft.value.closerId, slotStart: new Date(availabilityDraft.value.slotStart).toISOString(), slotEnd: new Date(availabilityDraft.value.slotEnd).toISOString(), capacity: Number(availabilityDraft.value.capacity) }); slots.value = await getFieldAvailability(); message.value = "Closer assignment availability published."; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to publish availability."; } }
+async function createAvailability() {
+  availabilityError.value = "";
+  const { closerId, slotStart, slotEnd, capacity } = availabilityDraft.value;
+  const start = new Date(slotStart);
+  const end = new Date(slotEnd);
+  const capacityNumber = Number(capacity);
+  if (!closerId || !slotStart || !slotEnd || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+    availabilityError.value = "Select a closer, start date and time, and end date and time.";
+    return;
+  }
+  if (end.getTime() <= start.getTime()) {
+    availabilityError.value = "The end date and time must be after the start.";
+    return;
+  }
+  if (!Number.isInteger(capacityNumber) || capacityNumber < 1 || capacityNumber > 100) {
+    availabilityError.value = "Capacity must be a whole number from 1 to 100.";
+    return;
+  }
+  availabilitySaving.value = true;
+  try {
+    await createFieldAvailability({ closerId, slotStart: start.toISOString(), slotEnd: end.toISOString(), capacity: capacityNumber });
+    slots.value = await getFieldAvailability();
+    message.value = "Closer assignment availability published.";
+  } catch (cause) {
+    availabilityError.value = cause instanceof Error ? cause.message : "Unable to publish availability.";
+  } finally {
+    availabilitySaving.value = false;
+  }
+}
 async function saveDefinition(definition: FieldOperationalSlotDefinition) { try { const updated = await updateFieldOperationalSlotDefinition(definition.id, Math.floor(definitionDraft.value[definition.id] ?? definition.standardCapacity), policyDraft.value[definition.id] ?? definition.overflowPolicy); definitions.value = definitions.value.map((item) => item.id === updated.id ? updated : item); operationalSlots.value = await getFieldOperationalSlots(); message.value = `${formatDefinitionTime(updated.startTime)} capacity rule updated.`; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to update the operational slot rule."; } }
 async function assign(appointment: FieldAppointment) { const closerId = assignmentDraft.value[appointment.id]; if (!closerId) return; try { const updated = await assignFieldAppointment(appointment.id, closerId); replaceAppointment(updated); availableClosers.value[appointment.id] = await getAvailableFieldClosers(updated.id).catch(() => []); await refreshReport(); message.value = appointment.status === "UNASSIGNED" ? "Closer assigned." : "Closer reassigned."; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to assign the closer."; } }
 async function recordOutcome(appointment: FieldAppointment, outcome: string) { if (outcome === "CANCELLED" && !window.confirm("Cancel this appointment? This will release its slot capacity.")) return; try { const updated = await updateFieldOutcome(appointment.id, outcome); replaceAppointment(updated); await openAppointment(updated.id); await refreshReport(); message.value = `Outcome recorded: ${outcome}.`; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to record the outcome."; } }

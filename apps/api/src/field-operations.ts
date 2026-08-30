@@ -93,10 +93,24 @@ export class FieldOperationsService {
 
   async createAvailability(user: AuthenticatedPlatformUser, input: CreateAvailabilityInput): Promise<FieldAvailabilitySlot> {
     requirePermission(user, "appointment:assign");
+    if (!isValidDate(input.slotStart) || !isValidDate(input.slotEnd) || new Date(input.slotEnd).getTime() <= new Date(input.slotStart).getTime()) {
+      throw new PlatformHttpError(400, "Availability must include a valid start and end time, with the end after the start.", "AVAILABILITY_INVALID");
+    }
+    if (!Number.isInteger(input.capacity ?? 1) || (input.capacity ?? 1) < 1 || (input.capacity ?? 1) > 100) {
+      throw new PlatformHttpError(400, "Capacity must be an integer from 1 to 100.", "AVAILABILITY_CAPACITY_INVALID");
+    }
     const closers = await this.repository.listEligibleClosers(scopedTeams(user));
     const closer = closers.find((candidate) => candidate.id === input.closerId);
     if (!closer) throw new PlatformHttpError(403, "That closer is not eligible for your team.", "CLOSER_NOT_ELIGIBLE");
-    const created = await this.repository.createAvailability(input);
+    let created: FieldAvailabilitySlot | null;
+    try {
+      created = await this.repository.createAvailability(input);
+    } catch (cause) {
+      if (isUniqueConstraintError(cause, "idx_field_ops_closer_slot_start")) {
+        throw new PlatformHttpError(409, "This closer already has availability at that start time.", "AVAILABILITY_EXISTS");
+      }
+      throw cause;
+    }
     if (!created) throw new PlatformHttpError(400, "Availability could not be created for that closer.", "AVAILABILITY_INVALID");
     return created;
   }
@@ -337,4 +351,10 @@ function isSupportedBillContent(content: Buffer, mimeType: string): boolean {
 
 function isValidDate(value: string): boolean {
   return typeof value === "string" && Number.isFinite(new Date(value).getTime());
+}
+
+function isUniqueConstraintError(error: unknown, constraint: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const databaseError = error as { code?: unknown; constraint?: unknown };
+  return databaseError.code === "23505" && databaseError.constraint === constraint;
 }
