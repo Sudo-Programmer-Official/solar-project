@@ -7,11 +7,16 @@ export function formatOperationalTime(startTime: string): string {
   return `${hour}${rawMinute === 0 ? "" : `:${String(rawMinute).padStart(2, "0")}`} ${rawHour >= 12 ? "PM" : "AM"}`;
 }
 
-export function operationalSlotStateLabel(slot: Pick<FieldOperationalSlot, "bookedCount" | "overflowPolicy" | "status"> & { appointments?: unknown[] }): string {
-  const hasBooking = slot.bookedCount > 0 || (slot.appointments?.length ?? 0) > 0;
-  if (!hasBooking) return "Available";
-  if (slot.status === "OPEN" && slot.overflowPolicy === "ALLOW_WITH_WARNING") return "Booked · Overflow available";
-  return "Booked";
+export function operationalSlotStateLabel(slot: Pick<FieldOperationalSlot, "bookedCount" | "standardCapacity" | "remainingCapacity" | "overflowPolicy" | "status"> & { appointments?: unknown[] }): string {
+  const standardCapacity = Math.max(1, Math.floor(Number(slot.standardCapacity) || 1));
+  const bookedCount = Math.max(0, Math.floor(Number(slot.bookedCount) || 0));
+  const remainingCapacity = Math.max(0, Math.floor(Number(slot.remainingCapacity) || Math.max(standardCapacity - bookedCount, 0)));
+  if (remainingCapacity > 0) {
+    if (bookedCount === 0) return standardCapacity === 1 ? "Available" : `Open · ${standardCapacity} spots`;
+    return `${remainingCapacity} ${remainingCapacity === 1 ? "spot" : "spots"} left`;
+  }
+  if (slot.status === "OPEN" && slot.overflowPolicy === "ALLOW_WITH_WARNING") return "Full · Overflow available";
+  return "Full";
 }
 
 export function formatOperationalDate(date: string, options: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" }): string {

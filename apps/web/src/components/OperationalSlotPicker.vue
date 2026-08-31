@@ -112,15 +112,19 @@ function selectSlot(slot: FieldOperationalSlot) {
 }
 
 function isOverflowAvailable(slot: FieldOperationalSlot): boolean {
-  return hasBooking(slot) && slot.overflowPolicy === "ALLOW_WITH_WARNING" && slot.status === "OPEN";
+  return isStandardCapacityExhausted(slot) && slot.overflowPolicy === "ALLOW_WITH_WARNING" && slot.status === "OPEN";
 }
 
 function isBlocked(slot: FieldOperationalSlot): boolean {
-  return slot.status === "BLOCKED" || (hasBooking(slot) && slot.overflowPolicy === "BLOCK");
+  return slot.status === "BLOCKED" || (isStandardCapacityExhausted(slot) && slot.overflowPolicy === "BLOCK");
 }
 
 function hasBooking(slot: FieldOperationalSlot): boolean {
   return slot.bookedCount > 0 || slot.appointments.length > 0;
+}
+
+function isStandardCapacityExhausted(slot: FieldOperationalSlot): boolean {
+  return hasBooking(slot) && slot.remainingCapacity <= 0;
 }
 
 function slotClasses(slot: FieldOperationalSlot): string {

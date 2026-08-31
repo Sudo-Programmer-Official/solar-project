@@ -41,7 +41,7 @@ test("setter scheduling uses the shared fixed-slot picker", async () => {
   assert.match(pickerSource, /Add to overflow/);
   assert.doesNotMatch(pickerSource, /datetime-local|type="time"|type="date"/);
   assert.match(slotUtilsSource, /operationalSlotStateLabel/);
-  assert.match(slotUtilsSource, /Booked · Overflow available/);
+  assert.match(slotUtilsSource, /Full · Overflow available/);
   assert.doesNotMatch(slotUtilsSource, /1 left|2 left/);
   assert.doesNotMatch(pickerSource, /operationalCapacityLabel/);
 });
