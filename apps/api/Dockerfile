@@ -8,7 +8,7 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY scripts ./scripts
 
 RUN npm ci
-RUN npm run build
+RUN npm run build:api
 
 FROM node:20-alpine AS runtime
 WORKDIR /app

@@ -14,6 +14,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "npm run typecheck:web && tsc -p tsconfig.json --noEmit",
     "typecheck:web": "npm run typecheck --workspace @solar/web",
+    "build:api": "tsc -p tsconfig.build.json",
     "test": "node scripts/run-tests.mjs",
     "test:browser": "playwright test",
     "qa:mobile-hunt": "playwright test tests/mobile-swipe-hunt.spec.ts",
