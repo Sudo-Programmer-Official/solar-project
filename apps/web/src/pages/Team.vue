@@ -39,18 +39,13 @@
           <input v-model="draft.phone" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3 text-sm" placeholder="Phone (optional)" type="tel" />
           <input v-model="draft.password" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3 text-sm" placeholder="Temporary password or leave blank to invite" type="password" minlength="12" />
         </div>
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button
-            v-for="roleOption in assignableRoles"
-            :key="roleOption"
-            class="rounded-full border px-3 py-2 text-xs font-semibold"
-            :class="draft.roles.includes(roleOption) ? 'border-primary-300 bg-white text-primary-700' : 'border-slate-200 bg-white text-slate-600'"
-            type="button"
-            @click="toggleDraftRole(roleOption)"
-          >
-            {{ roleOption }}
-          </button>
-        </div>
+        <label class="mt-3 grid gap-1 text-xs font-semibold text-slate-600 sm:max-w-xs">
+          <span>Role</span>
+          <select v-model="draftRole" class="min-h-touch w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700" aria-label="Role">
+            <option v-for="roleOption in assignableRoles" :key="roleOption" :value="roleOption">{{ roleLabel(roleOption) }}</option>
+          </select>
+          <span class="font-normal text-slate-500">Additional roles can be added from Edit roles after the member is created.</span>
+        </label>
         <button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" :disabled="saving" type="submit">
           {{ saving ? "Saving…" : draft.password ? "Create user" : "Create and invite" }}
         </button>
@@ -138,6 +133,12 @@ const successMessage = ref("");
 const editingId = ref<string | null>(null);
 const editRoles = ref<PlatformRole[]>([]);
 const draft = ref({ firstName: "", lastName: "", email: "", phone: "", password: "", roles: [PlatformRole.SETTER] as PlatformRole[] });
+const draftRole = computed<PlatformRole>({
+  get: () => draft.value.roles[0] ?? assignableRoles.value[0] ?? PlatformRole.SETTER,
+  set: (role) => {
+    if (assignableRoles.value.includes(role)) draft.value.roles = [role];
+  },
+});
 const roleDefinitions: Array<{ code: PlatformRole; name: string; description: string; permissions: readonly PlatformPermission[] | readonly ["*"] }> = [
   { code: PlatformRole.SETTER, name: "Setter", description: "Captures leads, creates appointments, uploads bills, and owns the early pipeline.", permissions: PLATFORM_ROLE_PERMISSIONS.SETTER },
   { code: PlatformRole.CLOSER, name: "Closer", description: "Works assigned appointments, captures outcomes, and keeps appointment context current. Add Setter for lead capture.", permissions: PLATFORM_ROLE_PERMISSIONS.CLOSER },
@@ -167,10 +168,6 @@ async function loadTeam() {
   } finally {
     loading.value = false;
   }
-}
-
-function toggleDraftRole(role: PlatformRole) {
-  draft.value.roles = toggleRoleValue(draft.value.roles, role);
 }
 
 function toggleEditRole(role: PlatformRole) {
@@ -237,6 +234,10 @@ function replaceMember(updated: TeamMember) {
 
 function toggleRoleValue(values: PlatformRole[], role: PlatformRole): PlatformRole[] {
   return values.includes(role) ? values.filter((value) => value !== role) : [...values, role];
+}
+
+function roleLabel(role: PlatformRole): string {
+  return roleDefinitions.find((definition) => definition.code === role)?.name ?? role.replaceAll("_", " ");
 }
 
 function canManageMember(member: TeamMember): boolean {
