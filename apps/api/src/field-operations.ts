@@ -161,13 +161,17 @@ export class FieldOperationsService {
   }
 
   async assignAppointment(user: AuthenticatedPlatformUser, appointmentId: string, closerId: string): Promise<FieldAppointment> {
-    requirePermission(user, "appointment:assign");
-    const { context, appointment } = await this.getAppointment(user, appointmentId);
-    if (appointment.status !== "UNASSIGNED" && !( ["ASSIGNED", "RESCHEDULED"].includes(appointment.status) && user.permissions.includes("appointment:reassign"))) {
+    const { appointment } = await this.getAppointment(user, appointmentId);
+    if (appointment.status === "UNASSIGNED") requirePermission(user, "appointment:assign");
+    else requirePermission(user, "appointment:reassign");
+    if (appointment.status !== "UNASSIGNED" && !["ASSIGNED", "RESCHEDULED"].includes(appointment.status)) {
       throw new PlatformHttpError(409, "Only an unassigned appointment can be assigned.", "APPOINTMENT_NOT_ASSIGNABLE");
     }
     const assigned = await this.repository.assignAppointment({ appointmentId, closerId, assignedBy: user.id, teamIds: scopedTeams(user), allowReassign: user.permissions.includes("appointment:reassign") });
-    if (!assigned) throw new PlatformHttpError(409, "The closer is not eligible or the appointment changed.", "ASSIGNMENT_CONFLICT");
+    if (!assigned) {
+      const time = new Date(appointment.scheduledStart).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      throw new PlatformHttpError(409, `That closer is no longer available for the ${time} appointment. Choose another eligible closer.`, "ASSIGNMENT_CONFLICT");
+    }
     return assigned;
   }
 
@@ -241,30 +245,62 @@ export class FieldOperationsService {
   async getFollowUp(user: AuthenticatedPlatformUser, followUpId: string): Promise<FieldFollowUp> {
     const followUp = await this.repository.getFollowUp(followUpId);
     if (!followUp) throw new PlatformHttpError(404, "Follow-up not found.", "FOLLOW_UP_NOT_FOUND");
-    const context = await this.getLead(user, followUp.leadId);
-    const canViewTeam = user.permissions.includes("*" as PlatformPermission) || (user.permissions.includes("followup:view-team") && (context.lead.teamId == null || user.teamIds.includes(context.lead.teamId)));
+    const canViewTeam = user.permissions.includes("*" as PlatformPermission) || (user.permissions.includes("followup:view-team") && (followUp.teamId == null || user.teamIds.includes(followUp.teamId)));
     const canViewOwn = user.permissions.includes("*" as PlatformPermission) || (user.permissions.includes("followup:view-own") && followUp.ownerUserId === user.id);
     if (!canViewTeam && !canViewOwn) throw new PlatformHttpError(403, "You do not have access to this follow-up.", "FOLLOW_UP_FORBIDDEN");
     return followUp;
   }
 
-  async createFollowUp(user: AuthenticatedPlatformUser, leadId: string, input: { dueAt: string; reason: string; note?: string }): Promise<FieldFollowUp> {
+  async createFollowUp(user: AuthenticatedPlatformUser, input: { leadId?: string | null; teamId?: string | null; dueAt?: string | null; dueDaypart?: string | null; homeownerName?: string | null; phone?: string | null; email?: string | null; addressLine1?: string | null; city?: string | null; state?: string | null; postalCode?: string | null; latitude?: number | null; longitude?: number | null; reason: string; note?: string }): Promise<FieldFollowUp> {
     requirePermission(user, "followup:create");
-    await this.getLead(user, leadId);
-    if (!isValidDate(input.dueAt)) throw new PlatformHttpError(400, "dueAt must be a valid date.", "FOLLOW_UP_INVALID");
+    const linkedLead = input.leadId ? await this.getLead(user, input.leadId) : null;
+    const lead = linkedLead?.lead;
+    const addressLine1 = (input.addressLine1 ?? lead?.addressLine1 ?? "").trim();
+    if (!addressLine1) throw new PlatformHttpError(400, "A property address is required.", "FOLLOW_UP_ADDRESS_REQUIRED");
+    if (input.dueAt != null && !isValidDate(input.dueAt)) throw new PlatformHttpError(400, "dueAt must be a valid date.", "FOLLOW_UP_INVALID");
+    if (input.dueAt == null && !input.dueDaypart) throw new PlatformHttpError(400, "Choose a follow-up time or daypart.", "FOLLOW_UP_SCHEDULE_REQUIRED");
+    if (input.dueDaypart != null && !validFollowUpDaypart(input.dueDaypart)) throw new PlatformHttpError(400, "That follow-up daypart is not supported.", "FOLLOW_UP_DAYPART_INVALID");
     if (!input.reason.trim()) throw new PlatformHttpError(400, "A follow-up reason is required.", "FOLLOW_UP_REASON_REQUIRED");
-    return this.repository.createFollowUp({ leadId, ownerUserId: user.id, dueAt: input.dueAt, reason: input.reason.trim(), note: input.note?.trim() ?? "", createdBy: user.id });
+    const teamId = input.teamId ?? lead?.teamId ?? user.teamIds[0] ?? null;
+    assertTeamAccess(user, teamId);
+    return this.repository.createFollowUp({
+      leadId: input.leadId ?? null, teamId, ownerUserId: user.id, dueAt: input.dueAt ?? null, dueDaypart: input.dueDaypart ?? null,
+      homeownerName: input.homeownerName?.trim() ?? lead?.homeownerName ?? "", phone: input.phone?.trim() || lead?.phone || null, email: input.email?.trim() || lead?.email || null,
+      addressLine1, city: input.city?.trim() || lead?.city || null, state: input.state?.trim() || lead?.state || null, postalCode: input.postalCode?.trim() || lead?.postalCode || null,
+      latitude: input.latitude ?? lead?.latitude ?? null, longitude: input.longitude ?? lead?.longitude ?? null, reason: input.reason.trim(), note: input.note?.trim() ?? "", createdBy: user.id,
+    });
   }
 
-  async updateFollowUp(user: AuthenticatedPlatformUser, followUpId: string, input: { status: FieldFollowUpStatus; dueAt?: string }): Promise<FieldFollowUp> {
+  async updateFollowUp(user: AuthenticatedPlatformUser, followUpId: string, input: { status: FieldFollowUpStatus; dueAt?: string | null; dueDaypart?: string | null }): Promise<FieldFollowUp> {
     requirePermission(user, "followup:update-own");
     const followUp = await this.getFollowUp(user, followUpId);
     if (followUp.ownerUserId !== user.id && !user.permissions.includes("*" as PlatformPermission)) throw new PlatformHttpError(403, "Only the follow-up owner can update it.", "FOLLOW_UP_OWNER_REQUIRED");
-    if (input.dueAt !== undefined && !isValidDate(input.dueAt)) throw new PlatformHttpError(400, "dueAt must be a valid date.", "FOLLOW_UP_INVALID");
+    if (input.dueAt != null && !isValidDate(input.dueAt)) throw new PlatformHttpError(400, "dueAt must be a valid date.", "FOLLOW_UP_INVALID");
+    if (input.dueDaypart && !validFollowUpDaypart(input.dueDaypart)) throw new PlatformHttpError(400, "That follow-up daypart is not supported.", "FOLLOW_UP_DAYPART_INVALID");
     if (!( ["DONE", "SNOOZED", "CANCELLED"] as FieldFollowUpStatus[]).includes(input.status)) throw new PlatformHttpError(400, "That follow-up status cannot be set directly.", "FOLLOW_UP_STATUS_INVALID");
-    const updated = await this.repository.updateFollowUp({ id: followUp.id, actorId: user.id, status: input.status, dueAt: input.dueAt });
+    const updated = await this.repository.updateFollowUp({ id: followUp.id, actorId: user.id, status: input.status, dueAt: input.dueAt, dueDaypart: input.dueDaypart });
     if (!updated) throw new PlatformHttpError(409, "The follow-up could not be updated.", "FOLLOW_UP_CONFLICT");
     return updated;
+  }
+
+  async addFollowUpNote(user: AuthenticatedPlatformUser, followUpId: string, body: string): Promise<FieldFollowUp> {
+    requirePermission(user, "followup:update-own");
+    const followUp = await this.getFollowUp(user, followUpId);
+    if (followUp.ownerUserId !== user.id && !user.permissions.includes("*" as PlatformPermission)) throw new PlatformHttpError(403, "Only the follow-up owner can update it.", "FOLLOW_UP_OWNER_REQUIRED");
+    const note = body.trim();
+    if (!note) throw new PlatformHttpError(400, "A note is required.", "FOLLOW_UP_NOTE_REQUIRED");
+    const updated = await this.repository.addFollowUpNote({ id: followUp.id, actorId: user.id, body: note });
+    if (!updated) throw new PlatformHttpError(409, "The follow-up could not be updated.", "FOLLOW_UP_CONFLICT");
+    return updated;
+  }
+
+  async convertFollowUpToLead(user: AuthenticatedPlatformUser, followUpId: string): Promise<{ followUp: FieldFollowUp; lead: FieldLead }> {
+    requirePermission(user, "lead:create");
+    const followUp = await this.getFollowUp(user, followUpId);
+    assertTeamAccess(user, followUp.teamId);
+    const converted = await this.repository.convertFollowUpToLead({ followUpId: followUp.id, setterId: user.id, teamId: followUp.teamId });
+    if (!converted) throw new PlatformHttpError(409, "This follow-up has already been converted or is no longer available.", "FOLLOW_UP_ALREADY_CONVERTED");
+    return converted;
   }
 
   async convertFollowUp(user: AuthenticatedPlatformUser, followUpId: string, slot: { slotId?: string; operationalSlotId?: string; allowOverflow?: boolean }, appointmentType?: string): Promise<{ followUp: FieldFollowUp; appointment: FieldAppointment }> {
@@ -351,6 +387,10 @@ function isSupportedBillContent(content: Buffer, mimeType: string): boolean {
 
 function isValidDate(value: string): boolean {
   return typeof value === "string" && Number.isFinite(new Date(value).getTime());
+}
+
+function validFollowUpDaypart(value: string): boolean {
+  return ["MORNING", "AFTERNOON", "EVENING"].includes(value);
 }
 
 function isUniqueConstraintError(error: unknown, constraint: string): boolean {

@@ -64,7 +64,7 @@ test("QA cleanup deletes only marked field data in dependency order", async () =
     followUps: 1,
   });
   assert.deepEqual(statements.map((statement) => statement.match(/field_ops\.([a-z_]+)/)?.[1]), [
-    "sheet_sync_jobs", "activities", "bill_attachments", "notes", "follow_ups", "appointments", "operational_slots", "leads", "closer_availability",
+    "sheet_sync_jobs", "activities", "bill_attachments", "notes", "follow_up_activities", "follow_ups", "appointments", "operational_slots", "leads", "closer_availability",
   ]);
   assert.ok(statements.filter((statement) => statement.startsWith("DELETE")).every((statement) => statement.includes("is_test_data = TRUE")));
   assert.doesNotMatch(statements.join("\n"), /field_ops\.(users|roles|permissions|user_roles|role_permissions|teams|user_teams)/);

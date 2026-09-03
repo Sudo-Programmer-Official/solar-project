@@ -35,7 +35,7 @@
 
       <section v-if="dueFollowUps.length" class="page-surface mt-4 p-4">
         <div class="flex items-center justify-between gap-3"><div><p class="field-label">NEEDS ATTENTION</p><h2 class="mt-1 text-lg font-semibold text-slate-900">Follow-ups due today</h2></div><RouterLink to="/follow-ups" class="text-xs font-semibold text-primary-700">Open follow-ups</RouterLink></div>
-        <div class="mt-3 grid gap-2"><RouterLink v-for="followUp in dueFollowUps.slice(0, 3)" :key="followUp.id" :to="`/leads/${followUp.leadId}`" class="rounded-2xl border border-slate-200 p-3"><p class="text-sm font-semibold text-slate-900">{{ followUp.homeownerName }}</p><p class="mt-1 text-xs text-slate-500">{{ followUp.reason }} · {{ followUp.note || "Reconnect with homeowner" }}</p></RouterLink></div>
+        <div class="mt-3 grid gap-2"><RouterLink v-for="followUp in dueFollowUps.slice(0, 3)" :key="followUp.id" :to="followUp.convertedLeadId || followUp.leadId ? `/leads/${followUp.convertedLeadId || followUp.leadId}` : '/follow-ups'" class="rounded-2xl border border-slate-200 p-3"><p class="text-sm font-semibold text-slate-900">{{ followUp.homeownerName || `Homeowner at ${followUp.addressLine1}` }}</p><p class="mt-1 text-xs text-slate-500">{{ followUp.reason }} · {{ followUp.note || "Reconnect with homeowner" }}</p></RouterLink></div>
       </section>
 
       <section class="page-surface mt-4 p-4">
@@ -71,7 +71,7 @@ const greeting = computed(() => {
   return hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
 });
 const unassignedCount = computed(() => appointments.value.filter((appointment) => appointment.status === "UNASSIGNED").length);
-const dueFollowUps = computed(() => { const tomorrow = new Date(); tomorrow.setHours(24, 0, 0, 0); const start = new Date(); start.setHours(0, 0, 0, 0); return followUps.value.filter((item) => (item.status === "OPEN" || item.status === "SNOOZED") && new Date(item.dueAt) >= start && new Date(item.dueAt) < tomorrow); });
+const dueFollowUps = computed(() => { const tomorrow = new Date(); tomorrow.setHours(24, 0, 0, 0); const start = new Date(); start.setHours(0, 0, 0, 0); return followUps.value.filter((item) => (item.status === "OPEN" || item.status === "SNOOZED") && item.dueAt && new Date(item.dueAt) >= start && new Date(item.dueAt) < tomorrow); });
 const followUpCount = computed(() => dueFollowUps.value.length);
 const closedCount = computed(() => leads.value.filter((lead) => lead.status === "CLOSED").length);
 const metrics = computed(() => [

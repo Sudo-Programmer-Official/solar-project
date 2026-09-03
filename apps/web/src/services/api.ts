@@ -70,6 +70,7 @@ export interface TeamMemberInput {
 
 export interface FieldLead {
   id: string;
+  sourceFollowUpId?: string | null;
   propertyId: string | null;
   setterId: string | null;
   currentCloserId: string | null;
@@ -119,6 +120,14 @@ export interface FieldAppointment {
   cancelledBy: string | null;
   createdAt: string;
   updatedAt: string;
+  homeownerName?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  setterName?: string | null;
+  closerName?: string | null;
+  hasBill?: boolean;
 }
 
 export interface FieldAvailabilitySlot {
@@ -190,12 +199,23 @@ export interface FieldReport {
   cancellationReasons: Array<{ reason: string; count: number }>;
 }
 
-export type FieldFollowUpStatus = "OPEN" | "DONE" | "SNOOZED" | "CANCELLED" | "CONVERTED_TO_APPOINTMENT";
+export type FieldFollowUpStatus = "OPEN" | "DONE" | "SNOOZED" | "CANCELLED" | "CONVERTED_TO_APPOINTMENT" | "CONVERTED";
+export interface FieldFollowUpActivity {
+  id: string;
+  followUpId: string;
+  actorId: string | null;
+  eventType: string;
+  event: unknown;
+  createdAt: string;
+}
 export interface FieldFollowUp {
   id: string;
-  leadId: string;
+  leadId: string | null;
+  teamId: string | null;
+  convertedLeadId: string | null;
   ownerUserId: string;
-  dueAt: string;
+  dueAt: string | null;
+  dueDaypart: string | null;
   reason: string;
   note: string;
   status: FieldFollowUpStatus;
@@ -207,6 +227,13 @@ export interface FieldFollowUp {
   homeownerName: string;
   addressLine1: string;
   phone: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  activities: FieldFollowUpActivity[];
 }
 
 export interface AvailableCloser {
@@ -608,9 +635,23 @@ export async function getFieldFollowUp(id: string): Promise<FieldFollowUp> {
   return response.followUp;
 }
 
-export async function createFieldFollowUp(input: { leadId: string; dueAt: string; reason: string; note?: string }): Promise<FieldFollowUp> {
+export async function createFieldFollowUp(input: { leadId?: string | null; teamId?: string | null; homeownerName?: string | null; phone?: string | null; email?: string | null; addressLine1: string; city?: string | null; state?: string | null; postalCode?: string | null; latitude?: number | null; longitude?: number | null; dueAt?: string | null; dueDaypart?: string | null; reason: string; note?: string }): Promise<FieldFollowUp> {
   const response = await requestPlatformJson<{ followUp: FieldFollowUp }>("/api/v1/field/follow-ups", { method: "POST", body: JSON.stringify(input) });
   return response.followUp;
+}
+
+export async function rescheduleFieldFollowUp(id: string, input: { dueAt?: string | null; dueDaypart?: string | null }): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/reschedule`, { method: "POST", body: JSON.stringify(input) });
+  return response.followUp;
+}
+
+export async function addFieldFollowUpNote(id: string, body: string): Promise<FieldFollowUp> {
+  const response = await requestPlatformJson<{ followUp: FieldFollowUp }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/note`, { method: "POST", body: JSON.stringify({ body }) });
+  return response.followUp;
+}
+
+export async function convertFieldFollowUpToLead(id: string): Promise<{ followUp: FieldFollowUp; lead: FieldLead }> {
+  return requestPlatformJson<{ followUp: FieldFollowUp; lead: FieldLead }>(`/api/v1/field/follow-ups/${encodeURIComponent(id)}/convert-to-lead`, { method: "POST" });
 }
 
 export async function snoozeFieldFollowUp(id: string, dueAt: string): Promise<FieldFollowUp> {

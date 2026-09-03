@@ -13,10 +13,11 @@ export type FieldAppointmentOutcome =
   | "NOT_QUALIFIED" | "FOLLOW_UP" | "RESCHEDULED" | "CANCELLED"
   | "SAT" | "PROPOSAL" | "NOT_INTERESTED";
 export type FieldListScope = "all" | "team" | "own" | "assigned" | "own-or-assigned";
-export type FieldFollowUpStatus = "OPEN" | "DONE" | "SNOOZED" | "CANCELLED" | "CONVERTED_TO_APPOINTMENT";
+export type FieldFollowUpStatus = "OPEN" | "DONE" | "SNOOZED" | "CANCELLED" | "CONVERTED_TO_APPOINTMENT" | "CONVERTED";
 
 export interface FieldLead {
   id: string;
+  sourceFollowUpId?: string | null;
   propertyId: string | null;
   setterId: string | null;
   currentCloserId: string | null;
@@ -66,6 +67,14 @@ export interface FieldAppointment {
   cancelledBy: string | null;
   createdAt: string;
   updatedAt: string;
+  homeownerName?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  setterName?: string | null;
+  closerName?: string | null;
+  hasBill?: boolean;
 }
 
 export interface FieldAvailabilitySlot {
@@ -137,9 +146,12 @@ export interface FieldCloserCandidate {
 
 export interface FieldFollowUp {
   id: string;
-  leadId: string;
+  leadId: string | null;
+  teamId: string | null;
+  convertedLeadId: string | null;
   ownerUserId: string;
-  dueAt: string;
+  dueAt: string | null;
+  dueDaypart: string | null;
   reason: string;
   note: string;
   status: FieldFollowUpStatus;
@@ -151,6 +163,22 @@ export interface FieldFollowUp {
   homeownerName: string;
   addressLine1: string;
   phone: string | null;
+  email: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  activities: FieldFollowUpActivity[];
+}
+
+export interface FieldFollowUpActivity {
+  id: string;
+  followUpId: string;
+  actorId: string | null;
+  eventType: string;
+  event: unknown;
+  createdAt: string;
 }
 
 export interface FieldBillAttachment {
@@ -272,19 +300,50 @@ export interface FieldOperationsRepository {
   addBill(input: { leadId: string; uploadedBy: string; storageKey: string; fileName: string; mimeType: string; fileSizeBytes: number; isTestData?: boolean }): Promise<FieldBillAttachment>;
   listFollowUps(input: { userId: string; teamIds: string[] | null; scope: FieldListScope }): Promise<FieldFollowUp[]>;
   getFollowUp(id: string): Promise<FieldFollowUp | null>;
-  createFollowUp(input: { id?: string; leadId: string; ownerUserId: string; dueAt: string; reason: string; note?: string; createdBy: string; isTestData?: boolean }): Promise<FieldFollowUp>;
-  updateFollowUp(input: { id: string; actorId: string; status: FieldFollowUpStatus; dueAt?: string; convertedAppointmentId?: string | null }): Promise<FieldFollowUp | null>;
+  createFollowUp(input: { id?: string; leadId?: string | null; teamId?: string | null; ownerUserId: string; dueAt?: string | null; dueDaypart?: string | null; homeownerName?: string; phone?: string | null; email?: string | null; addressLine1: string; city?: string | null; state?: string | null; postalCode?: string | null; latitude?: number | null; longitude?: number | null; reason: string; note?: string; createdBy: string; isTestData?: boolean }): Promise<FieldFollowUp>;
+  updateFollowUp(input: { id: string; actorId: string; status: FieldFollowUpStatus; dueAt?: string | null; dueDaypart?: string | null; convertedAppointmentId?: string | null }): Promise<FieldFollowUp | null>;
+  addFollowUpNote(input: { id: string; actorId: string; body: string; isTestData?: boolean }): Promise<FieldFollowUp | null>;
+  convertFollowUpToLead(input: { followUpId: string; setterId: string; teamId?: string | null; isTestData?: boolean }): Promise<{ followUp: FieldFollowUp; lead: FieldLead } | null>;
   convertFollowUpToAppointment(input: { followUpId: string; slotId?: string; operationalSlotId?: string; allowOverflow?: boolean; setterId: string; appointmentType?: string; isTestData?: boolean }): Promise<{ followUp: FieldFollowUp; appointment: FieldAppointment } | null>;
   getReport(input: { userId: string; teamIds: string[] | null; scope: FieldListScope }): Promise<{ leadCount: number; appointmentCount: number; byStatus: Array<{ status: string; count: number }>; byOutcome: Array<{ outcome: string; count: number }>; sync: { pending: number; synced: number; failed: number }; capacity: { standard: number; booked: number; remaining: number; overflow: number }; unassignedCount: number; confirmedCount: number; cancelledCount: number; cancellationReasons: Array<{ reason: string; count: number }> }>;
   cleanTestData(): Promise<TestFieldDataCleanupSummary>;
 }
 
 const leadSelect = `
-  SELECT l.id, l.property_id, l.setter_id, l.current_closer_id, l.created_by_user_id, l.team_id,
+  SELECT l.id, l.source_follow_up_id, l.property_id, l.setter_id, l.current_closer_id, l.created_by_user_id, l.team_id,
          l.homeowner_name, l.phone, l.email, l.address_line1, l.city, l.state, l.postal_code,
          l.latitude, l.longitude, l.utility, l.supplier, l.approximate_monthly_bill,
          l.qualification_json, l.status, l.created_at, l.updated_at
   FROM field_ops.leads l
+`;
+
+const followUpSelect = `
+  SELECT f.id, f.lead_id, f.team_id, f.owner_user_id, f.due_at, f.due_daypart, f.reason, f.note, f.status,
+         f.created_by, f.created_at, f.completed_at, f.updated_at,
+         f.converted_appointment_id, f.converted_lead_id,
+         COALESCE(NULLIF(f.homeowner_name, ''), l.homeowner_name, '') AS homeowner_name,
+         COALESCE(NULLIF(f.address_line1, ''), l.address_line1, '') AS address_line1,
+         COALESCE(f.phone, l.phone) AS phone,
+         COALESCE(f.email, l.email) AS email,
+         COALESCE(f.city, l.city) AS city,
+         COALESCE(f.state, l.state) AS state,
+         COALESCE(f.postal_code, l.postal_code) AS postal_code,
+         COALESCE(f.latitude, l.latitude) AS latitude,
+         COALESCE(f.longitude, l.longitude) AS longitude,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'id', a.id,
+             'followUpId', a.follow_up_id,
+             'actorId', a.actor_id,
+             'eventType', a.event_type,
+             'event', a.event_json,
+             'createdAt', a.created_at
+           ) ORDER BY a.created_at ASC)
+           FROM field_ops.follow_up_activities a
+           WHERE a.follow_up_id = f.id
+         ), '[]'::jsonb) AS activities
+  FROM field_ops.follow_ups f
+  LEFT JOIN field_ops.leads l ON l.id = f.lead_id
 `;
 
 const appointmentColumns = `id, lead_id, setter_id, closer_id, team_id, availability_slot_id, operational_slot_id, is_overflow,
@@ -293,9 +352,15 @@ const appointmentColumns = `id, lead_id, setter_id, closer_id, team_id, availabi
 const appointmentColumnsWithAlias = `a.id, a.lead_id, a.setter_id, a.closer_id, a.team_id, a.availability_slot_id, a.operational_slot_id, a.is_overflow,
   a.scheduled_start, a.scheduled_end, a.timezone, a.appointment_type, a.status, a.outcome, a.outcome_notes, a.started_at, a.completed_at,
   a.assigned_at, a.assigned_by, a.notes, a.cancel_reason, a.cancelled_at, a.cancelled_by, a.created_at, a.updated_at`;
+const appointmentColumnsWithContext = `${appointmentColumnsWithAlias},
+  l.homeowner_name AS homeowner_name, l.address_line1 AS address_line1, l.city AS city,
+  l.state AS state, l.postal_code AS postal_code,
+  NULLIF(CONCAT_WS(' ', setter_user.first_name, setter_user.last_name), '') AS setter_name,
+  NULLIF(CONCAT_WS(' ', closer_user.first_name, closer_user.last_name), '') AS closer_name,
+  EXISTS (SELECT 1 FROM field_ops.bill_attachments bill WHERE bill.lead_id = a.lead_id AND bill.replaced_by IS NULL) AS has_bill`;
 
 interface LeadRow {
-  id: string; property_id: string | null; setter_id: string | null; current_closer_id: string | null;
+  id: string; source_follow_up_id: string | null; property_id: string | null; setter_id: string | null; current_closer_id: string | null;
   created_by_user_id: string | null; team_id: string | null; homeowner_name: string; phone: string | null;
   email: string | null; address_line1: string; city: string | null; state: string | null; postal_code: string | null;
   latitude: number | string | null; longitude: number | string | null; utility: string | null; supplier: string | null;
@@ -309,6 +374,8 @@ interface AppointmentRow {
   status: FieldAppointmentStatus; outcome: FieldAppointmentOutcome | null; outcome_notes: string | null;
   started_at: string | Date | null; completed_at: string | Date | null; assigned_at: string | Date | null;
   assigned_by: string | null; notes: string | null; cancel_reason?: string | null; cancelled_at?: string | Date | null; cancelled_by?: string | null; created_at: string | Date; updated_at: string | Date;
+  homeowner_name?: string | null; address_line1?: string | null; city?: string | null; state?: string | null; postal_code?: string | null;
+  setter_name?: string | null; closer_name?: string | null; has_bill?: boolean | null;
 }
 
 interface OperationalSlotRow {
@@ -359,7 +426,13 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
     const lead = leadResult.rows[0];
     if (!lead) return null;
     const [appointments, notes, bills, activities, sync] = await Promise.all([
-      this.client.query<AppointmentRow>(`SELECT ${appointmentColumns} FROM field_ops.appointments WHERE lead_id = $1 ORDER BY scheduled_start DESC`, [id]),
+      this.client.query<AppointmentRow>(
+        `SELECT ${appointmentColumnsWithContext}
+         FROM field_ops.appointments a
+         JOIN field_ops.leads l ON l.id = a.lead_id
+         LEFT JOIN field_ops.users setter_user ON setter_user.id = a.setter_id
+         LEFT JOIN field_ops.users closer_user ON closer_user.id = a.closer_id
+         WHERE a.lead_id = $1 ORDER BY a.scheduled_start DESC`, [id]),
       this.client.query<NoteRow>(`SELECT n.id, n.lead_id, n.appointment_id, n.author_id, CONCAT(u.first_name, ' ', u.last_name) AS author_name, (SELECT ur.role_id FROM field_ops.user_roles ur WHERE ur.user_id = n.author_id ORDER BY ur.role_id LIMIT 1) AS author_role, n.kind, n.body, n.created_at, n.updated_at FROM field_ops.notes n LEFT JOIN field_ops.users u ON u.id = n.author_id WHERE n.lead_id = $1 ORDER BY n.created_at DESC`, [id]),
       this.client.query<BillRow>(`SELECT id, lead_id, uploaded_by, storage_key, file_name, mime_type, file_size_bytes, replaced_by, replaced_at, created_at FROM field_ops.bill_attachments WHERE lead_id = $1 ORDER BY created_at DESC`, [id]),
       this.client.query<ActivityRow>(`SELECT a.id, a.lead_id, a.actor_id, CONCAT(u.first_name, ' ', u.last_name) AS actor_name, a.event_type, a.event_json, a.created_at FROM field_ops.activities a LEFT JOIN field_ops.users u ON u.id = a.actor_id WHERE a.lead_id = $1 ORDER BY a.created_at DESC`, [id]),
@@ -409,7 +482,7 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         `INSERT INTO field_ops.leads
           (id, property_id, setter_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, is_test_data)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, 'KNOCKED', $19)
-         RETURNING id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
+         RETURNING id, source_follow_up_id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
         [id, input.propertyId ?? null, input.setterId, input.createdByUserId, input.teamId ?? null, input.homeownerName, input.phone ?? null, input.email ?? null, input.addressLine1, input.city ?? null, input.state ?? null, input.postalCode ?? null, input.latitude ?? null, input.longitude ?? null, input.utility ?? null, input.supplier ?? null, input.approximateMonthlyBill ?? null, JSON.stringify(input.qualification ?? {}), Boolean(input.isTestData)],
       );
       const lead = result.rows[0];
@@ -448,7 +521,7 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         `INSERT INTO field_ops.leads
           (id, property_id, setter_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, is_test_data)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, 'KNOCKED', $19)
-         RETURNING id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
+         RETURNING id, source_follow_up_id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
         [leadId, input.propertyId ?? null, input.setterId, input.createdByUserId, input.teamId ?? null, input.homeownerName, input.phone ?? null, input.email ?? null, input.addressLine1, input.city ?? null, input.state ?? null, input.postalCode ?? null, input.latitude ?? null, input.longitude ?? null, input.utility ?? null, input.supplier ?? null, input.approximateMonthlyBill ?? null, JSON.stringify(input.qualification ?? {}), Boolean(input.isTestData)],
       );
       const createdLead = leadResult.rows[0];
@@ -465,7 +538,7 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
       if (!appointmentRow) throw new Error("Appointment could not be created.");
 
       const leadStatusResult = await client.query<LeadRow>(
-        `UPDATE field_ops.leads SET status = 'APPOINTMENT_SET', updated_at = NOW() WHERE id = $1 RETURNING id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
+        `UPDATE field_ops.leads SET status = 'APPOINTMENT_SET', updated_at = NOW() WHERE id = $1 RETURNING id, source_follow_up_id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
         [leadId],
       );
       const lead = toLead(leadStatusResult.rows[0] ?? createdLead);
@@ -486,7 +559,7 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         `UPDATE field_ops.leads
          SET status = $2, updated_at = NOW()
          WHERE id = $1
-         RETURNING id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
+         RETURNING id, source_follow_up_id, property_id, setter_id, current_closer_id, created_by_user_id, team_id, homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude, utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
         [input.leadId, input.status],
       );
       const updated = updatedResult.rows[0];
@@ -685,8 +758,12 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
   async listAppointments(input: { userId: string; teamIds: string[] | null; scope: FieldListScope }): Promise<FieldAppointment[]> {
     const filter = scopeFilter("a", input.scope, input.userId, input.teamIds, 1);
     const result = await this.client.query<AppointmentRow>(
-      `SELECT ${appointmentColumnsWithAlias}
-       FROM field_ops.appointments a WHERE ${filter.sql} ORDER BY a.scheduled_start DESC LIMIT 250`, filter.params);
+      `SELECT ${appointmentColumnsWithContext}
+       FROM field_ops.appointments a
+       JOIN field_ops.leads l ON l.id = a.lead_id
+       LEFT JOIN field_ops.users setter_user ON setter_user.id = a.setter_id
+       LEFT JOIN field_ops.users closer_user ON closer_user.id = a.closer_id
+       WHERE ${filter.sql} ORDER BY a.scheduled_start DESC LIMIT 250`, filter.params);
     return result.rows.map(toAppointment);
   }
 
@@ -791,12 +868,32 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         appointmentId: appointment.id,
         fromCloserId: current.closer_id ?? null,
         toCloserId: input.closerId,
+        oldCloserId: current.closer_id ?? null,
+        newCloserId: input.closerId,
+        old_closer_id: current.closer_id ?? null,
+        new_closer_id: input.closerId,
         closerId: input.closerId,
         status: "ASSIGNED",
         message: reassigned ? "Closer changed" : "Closer assigned",
       }, input.isTestData);
+      await appendActivity(client, appointment.lead_id, input.assignedBy, "CLOSER_ASSIGNED", {
+        appointmentId: appointment.id,
+        oldCloserId: current.closer_id ?? null,
+        newCloserId: input.closerId,
+        old_closer_id: current.closer_id ?? null,
+        new_closer_id: input.closerId,
+        status: "ASSIGNED",
+        message: reassigned ? "Closer reassigned" : "Closer assigned",
+      }, input.isTestData);
       await queueSync(client, appointment.lead_id, input.isTestData);
-      return toAppointment(appointment);
+      const hydrated = await client.query<AppointmentRow>(
+        `SELECT ${appointmentColumnsWithContext}
+         FROM field_ops.appointments a
+         JOIN field_ops.leads l ON l.id = a.lead_id
+         LEFT JOIN field_ops.users setter_user ON setter_user.id = a.setter_id
+         LEFT JOIN field_ops.users closer_user ON closer_user.id = a.closer_id
+         WHERE a.id = $1`, [appointment.id]);
+      return hydrated.rows[0] ? toAppointment(hydrated.rows[0]) : toAppointment(appointment);
     });
   }
 
@@ -1037,74 +1134,141 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
   async listFollowUps(input: { userId: string; teamIds: string[] | null; scope: FieldListScope }): Promise<FieldFollowUp[]> {
     const filter = followUpScopeFilter(input.scope, input.userId, input.teamIds);
     const result = await this.client.query<FollowUpRow>(
-      `SELECT f.id, f.lead_id, f.owner_user_id, f.due_at, f.reason, f.note, f.status,
-              f.created_by, f.created_at, f.completed_at, f.updated_at,
-              f.converted_appointment_id, l.homeowner_name, l.address_line1, l.phone
-       FROM field_ops.follow_ups f
-       JOIN field_ops.leads l ON l.id = f.lead_id
+      `${followUpSelect}
        WHERE ${filter.sql}
-       ORDER BY CASE WHEN f.status IN ('OPEN', 'SNOOZED') THEN 0 ELSE 1 END, f.due_at ASC
+       ORDER BY CASE WHEN f.status IN ('OPEN', 'SNOOZED') THEN 0 ELSE 1 END,
+                f.due_at ASC NULLS LAST, f.updated_at DESC
        LIMIT 500`, filter.params);
     return result.rows.map(toFollowUp);
   }
 
   async getFollowUp(id: string): Promise<FieldFollowUp | null> {
     const result = await this.client.query<FollowUpRow>(
-      `SELECT f.id, f.lead_id, f.owner_user_id, f.due_at, f.reason, f.note, f.status,
-              f.created_by, f.created_at, f.completed_at, f.updated_at,
-              f.converted_appointment_id, l.homeowner_name, l.address_line1, l.phone
-       FROM field_ops.follow_ups f
-       JOIN field_ops.leads l ON l.id = f.lead_id
+      `${followUpSelect}
        WHERE f.id = $1`, [id]);
     return result.rows[0] ? toFollowUp(result.rows[0]) : null;
   }
 
-  async createFollowUp(input: { id?: string; leadId: string; ownerUserId: string; dueAt: string; reason: string; note?: string; createdBy: string; isTestData?: boolean }): Promise<FieldFollowUp> {
+  async createFollowUp(input: { id?: string; leadId?: string | null; teamId?: string | null; ownerUserId: string; dueAt?: string | null; dueDaypart?: string | null; homeownerName?: string; phone?: string | null; email?: string | null; addressLine1: string; city?: string | null; state?: string | null; postalCode?: string | null; latitude?: number | null; longitude?: number | null; reason: string; note?: string; createdBy: string; isTestData?: boolean }): Promise<FieldFollowUp> {
     return this.withTransaction(async (client) => {
-      const result = await client.query<FollowUpRow>(
+      const result = await client.query<{ id: string }>(
         `INSERT INTO field_ops.follow_ups
-          (id, lead_id, owner_user_id, due_at, reason, note, status, created_by, is_test_data)
-         VALUES ($1, $2, $3, $4, $5, $6, 'OPEN', $7, $8)
-         RETURNING id, lead_id, owner_user_id, due_at, reason, note, status, created_by,
-                   created_at, completed_at, updated_at, converted_appointment_id,
-                   $9::text AS homeowner_name, $10::text AS address_line1, NULL::text AS phone`,
-        [input.id ?? randomUUID(), input.leadId, input.ownerUserId, input.dueAt, input.reason, input.note ?? "", input.createdBy, Boolean(input.isTestData), "", ""]);
+          (id, lead_id, team_id, owner_user_id, due_at, due_daypart, homeowner_name, phone, email,
+           address_line1, city, state, postal_code, latitude, longitude, reason, note, status, created_by, is_test_data)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'OPEN', $18, $19)
+         RETURNING id`,
+        [input.id ?? randomUUID(), input.leadId ?? null, input.teamId ?? null, input.ownerUserId, input.dueAt ?? null, input.dueDaypart ?? null,
+          input.homeownerName ?? "", input.phone ?? null, input.email ?? null, input.addressLine1, input.city ?? null, input.state ?? null,
+          input.postalCode ?? null, input.latitude ?? null, input.longitude ?? null, input.reason, input.note ?? "", input.createdBy, Boolean(input.isTestData)]);
       const created = result.rows[0];
       if (!created) throw new Error("Follow-up could not be created.");
-      const hydrated = await client.query<FollowUpRow>(
-        `SELECT f.id, f.lead_id, f.owner_user_id, f.due_at, f.reason, f.note, f.status,
-                f.created_by, f.created_at, f.completed_at, f.updated_at,
-                f.converted_appointment_id, l.homeowner_name, l.address_line1, l.phone
-         FROM field_ops.follow_ups f JOIN field_ops.leads l ON l.id = f.lead_id WHERE f.id = $1`, [created.id]);
-      const followUp = hydrated.rows[0] ? toFollowUp(hydrated.rows[0]) : toFollowUp(created);
-      await appendActivity(client, input.leadId, input.createdBy, "FOLLOW_UP_CREATED", { followUpId: followUp.id, dueAt: input.dueAt, reason: input.reason }, input.isTestData);
-      await queueSync(client, input.leadId, input.isTestData);
+      await appendFollowUpActivity(client, created.id, input.createdBy, "FOLLOW_UP_CREATED", {
+        followUpId: created.id, dueAt: input.dueAt ?? null, dueDaypart: input.dueDaypart ?? null,
+        reason: input.reason,
+      }, input.isTestData);
+      if (input.note?.trim()) await appendFollowUpActivity(client, created.id, input.createdBy, "FOLLOW_UP_NOTE_ADDED", { body: input.note.trim() }, input.isTestData);
+      if (input.leadId) {
+        await appendActivity(client, input.leadId, input.createdBy, "FOLLOW_UP_CREATED", { followUpId: created.id, dueAt: input.dueAt ?? null, reason: input.reason }, input.isTestData);
+        await queueSync(client, input.leadId, input.isTestData);
+      }
+      const hydrated = await client.query<FollowUpRow>(`${followUpSelect} WHERE f.id = $1`, [created.id]);
+      if (!hydrated.rows[0]) throw new Error("Follow-up could not be loaded after creation.");
+      return toFollowUp(hydrated.rows[0]);
+    });
+  }
+
+  async updateFollowUp(input: { id: string; actorId: string; status: FieldFollowUpStatus; dueAt?: string | null; dueDaypart?: string | null; convertedAppointmentId?: string | null }): Promise<FieldFollowUp | null> {
+    return this.withTransaction(async (client) => {
+      const result = await client.query<{ id: string }>(
+        `UPDATE field_ops.follow_ups f
+         SET status = $2,
+             due_at = CASE WHEN $3::text IS NULL THEN f.due_at ELSE NULLIF($3::text, '')::timestamptz END,
+             due_daypart = CASE WHEN $4::text IS NULL THEN f.due_daypart ELSE NULLIF($4::text, '') END,
+             completed_at = CASE WHEN $2 IN ('DONE', 'CANCELLED', 'CONVERTED_TO_APPOINTMENT', 'CONVERTED') THEN COALESCE(f.completed_at, NOW()) ELSE NULL END,
+             converted_appointment_id = COALESCE($5::uuid, f.converted_appointment_id),
+             updated_at = NOW()
+         WHERE f.id = $1
+         RETURNING f.id`,
+        [input.id, input.status, input.dueAt === undefined ? null : input.dueAt, input.dueDaypart === undefined ? null : input.dueDaypart, input.convertedAppointmentId ?? null]);
+      const updated = result.rows[0];
+      if (!updated) return null;
+      const rescheduled = input.dueAt !== undefined || input.dueDaypart !== undefined;
+      const activityType = rescheduled ? "FOLLOW_UP_RESCHEDULED" : input.status === "DONE" ? "FOLLOW_UP_COMPLETED" : input.status === "CANCELLED" ? "FOLLOW_UP_CANCELLED" : "FOLLOW_UP_UPDATED";
+      await appendFollowUpActivity(client, updated.id, input.actorId, activityType, {
+        followUpId: updated.id, status: input.status, dueAt: input.dueAt ?? null, dueDaypart: input.dueDaypart ?? null,
+        convertedAppointmentId: input.convertedAppointmentId ?? null,
+      });
+      const hydrated = await client.query<FollowUpRow>(`${followUpSelect} WHERE f.id = $1`, [updated.id]);
+      const followUp = hydrated.rows[0] ? toFollowUp(hydrated.rows[0]) : null;
+      if (followUp?.leadId) {
+        await appendActivity(client, followUp.leadId, input.actorId, activityType, { followUpId: updated.id, status: input.status, dueAt: input.dueAt ?? null }, false);
+        await queueSync(client, followUp.leadId);
+      }
       return followUp;
     });
   }
 
-  async updateFollowUp(input: { id: string; actorId: string; status: FieldFollowUpStatus; dueAt?: string; convertedAppointmentId?: string | null }): Promise<FieldFollowUp | null> {
+  async addFollowUpNote(input: { id: string; actorId: string; body: string; isTestData?: boolean }): Promise<FieldFollowUp | null> {
     return this.withTransaction(async (client) => {
-      const result = await client.query<FollowUpRow>(
-        `UPDATE field_ops.follow_ups f
-         SET status = $2,
-             due_at = COALESCE($3::timestamptz, f.due_at),
-             completed_at = CASE WHEN $2 IN ('DONE', 'CANCELLED', 'CONVERTED_TO_APPOINTMENT') THEN COALESCE(f.completed_at, NOW()) ELSE NULL END,
-             converted_appointment_id = COALESCE($4::uuid, f.converted_appointment_id),
-             updated_at = NOW()
-         WHERE f.id = $1
-         RETURNING f.id, f.lead_id, f.owner_user_id, f.due_at, f.reason, f.note, f.status,
-                   f.created_by, f.created_at, f.completed_at, f.updated_at,
-                   f.converted_appointment_id,
-                   (SELECT homeowner_name FROM field_ops.leads WHERE id = f.lead_id) AS homeowner_name,
-                   (SELECT address_line1 FROM field_ops.leads WHERE id = f.lead_id) AS address_line1,
-                   (SELECT phone FROM field_ops.leads WHERE id = f.lead_id) AS phone`,
-        [input.id, input.status, input.dueAt ?? null, input.convertedAppointmentId ?? null]);
-      const updated = result.rows[0];
-      if (!updated) return null;
-      await appendActivity(client, updated.lead_id, input.actorId, "FOLLOW_UP_UPDATED", { followUpId: updated.id, status: input.status, dueAt: input.dueAt ?? null, convertedAppointmentId: input.convertedAppointmentId ?? null });
-      await queueSync(client, updated.lead_id);
-      return toFollowUp(updated);
+      const updated = await client.query<{ id: string }>(
+        `UPDATE field_ops.follow_ups SET updated_at = NOW() WHERE id = $1 RETURNING id`, [input.id]);
+      if (!updated.rows[0]) return null;
+      await appendFollowUpActivity(client, input.id, input.actorId, "FOLLOW_UP_NOTE_ADDED", { body: input.body }, input.isTestData);
+      const hydrated = await client.query<FollowUpRow>(`${followUpSelect} WHERE f.id = $1`, [input.id]);
+      const followUp = hydrated.rows[0] ? toFollowUp(hydrated.rows[0]) : null;
+      if (followUp?.leadId) {
+        await appendActivity(client, followUp.leadId, input.actorId, "FOLLOW_UP_NOTE_ADDED", { followUpId: input.id, body: input.body }, input.isTestData);
+        await queueSync(client, followUp.leadId, input.isTestData);
+      }
+      return followUp;
+    });
+  }
+
+  async convertFollowUpToLead(input: { followUpId: string; setterId: string; teamId?: string | null; isTestData?: boolean }): Promise<{ followUp: FieldFollowUp; lead: FieldLead } | null> {
+    return this.withTransaction(async (client) => {
+      const currentResult = await client.query<FollowUpConversionRow>(
+        `SELECT f.id, f.lead_id, f.team_id, f.owner_user_id, f.due_at, f.due_daypart, f.reason, f.note,
+                f.homeowner_name, f.phone, f.email, f.address_line1, f.city, f.state, f.postal_code,
+                f.latitude, f.longitude, f.status, f.converted_lead_id, f.is_test_data
+         FROM field_ops.follow_ups f WHERE f.id = $1 FOR UPDATE`, [input.followUpId]);
+      const current = currentResult.rows[0];
+      if (!current || current.lead_id || current.converted_lead_id || current.status === "CONVERTED" || current.status === "CONVERTED_TO_APPOINTMENT") return null;
+
+      const leadId = randomUUID();
+      const leadResult = await client.query<LeadRow>(
+        `INSERT INTO field_ops.leads
+          (id, source_follow_up_id, property_id, setter_id, created_by_user_id, team_id, homeowner_name, phone, email,
+           address_line1, city, state, postal_code, latitude, longitude, qualification_json, status, is_test_data)
+         VALUES ($1, $2, NULL, $3, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, 'KNOCKED', $15)
+         RETURNING id, source_follow_up_id, property_id, setter_id, current_closer_id, created_by_user_id, team_id,
+                   homeowner_name, phone, email, address_line1, city, state, postal_code, latitude, longitude,
+                   utility, supplier, approximate_monthly_bill, qualification_json, status, created_at, updated_at`,
+        [leadId, current.id, input.setterId, input.teamId ?? current.team_id ?? null,
+          current.homeowner_name.trim() || `Homeowner at ${current.address_line1}`,
+          current.phone, current.email, current.address_line1, current.city, current.state, current.postal_code,
+          current.latitude, current.longitude, JSON.stringify({ source: "PRE_LEAD_FOLLOW_UP", followUpId: current.id }), Boolean(input.isTestData ?? current.is_test_data)]);
+      const leadRow = leadResult.rows[0];
+      if (!leadRow) throw new Error("Lead could not be created from the follow-up.");
+      const lead = toLead(leadRow);
+
+      const noteActivities = await client.query<{ actor_id: string | null; event_json: unknown }>(
+        `SELECT actor_id, event_json FROM field_ops.follow_up_activities WHERE follow_up_id = $1 AND event_type = 'FOLLOW_UP_NOTE_ADDED' ORDER BY created_at ASC`, [current.id]);
+      if (noteActivities.rows.length === 0 && current.note.trim()) {
+        await insertLeadNote(client, lead.id, input.setterId, current.note, input.isTestData ?? current.is_test_data);
+      }
+      for (const activity of noteActivities.rows) {
+        const event = parseJson(activity.event_json) as { body?: unknown };
+        if (typeof event.body === "string" && event.body.trim()) await insertLeadNote(client, lead.id, activity.actor_id ?? input.setterId, event.body, input.isTestData ?? current.is_test_data);
+      }
+      await appendActivity(client, lead.id, input.setterId, "LEAD_CREATED", { status: "KNOCKED", sourceFollowUpId: current.id }, input.isTestData ?? current.is_test_data);
+      await appendActivity(client, lead.id, input.setterId, "FOLLOW_UP_CONVERTED", { followUpId: current.id, leadId: lead.id }, input.isTestData ?? current.is_test_data);
+      await queueSync(client, lead.id, input.isTestData ?? current.is_test_data);
+      await client.query(
+        `UPDATE field_ops.follow_ups SET status = 'CONVERTED', converted_lead_id = $2, completed_at = NOW(), updated_at = NOW() WHERE id = $1`, [current.id, lead.id]);
+      await appendFollowUpActivity(client, current.id, input.setterId, "FOLLOW_UP_CONVERTED", { followUpId: current.id, leadId: lead.id }, input.isTestData ?? current.is_test_data);
+      const followUpResult = await client.query<FollowUpRow>(`${followUpSelect} WHERE f.id = $1`, [current.id]);
+      const followUp = followUpResult.rows[0] ? toFollowUp(followUpResult.rows[0]) : null;
+      return followUp ? { followUp, lead } : null;
     });
   }
 
@@ -1121,18 +1285,14 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         slotId: input.slotId, operationalSlotId: input.operationalSlotId, allowOverflow: input.allowOverflow, appointmentType: input.appointmentType, isTestData: input.isTestData,
       });
       if (!appointment) return null;
-      const updatedResult = await client.query<FollowUpRow>(
+      await client.query(
         `UPDATE field_ops.follow_ups f
          SET status = 'CONVERTED_TO_APPOINTMENT', completed_at = NOW(), converted_appointment_id = $2, updated_at = NOW()
-         WHERE f.id = $1
-         RETURNING f.id, f.lead_id, f.owner_user_id, f.due_at, f.reason, f.note, f.status,
-                   f.created_by, f.created_at, f.completed_at, f.updated_at,
-                   f.converted_appointment_id,
-                   (SELECT homeowner_name FROM field_ops.leads WHERE id = f.lead_id) AS homeowner_name,
-                   (SELECT address_line1 FROM field_ops.leads WHERE id = f.lead_id) AS address_line1,
-                   (SELECT phone FROM field_ops.leads WHERE id = f.lead_id) AS phone`, [input.followUpId, appointment.id]);
+         WHERE f.id = $1`, [input.followUpId, appointment.id]);
+      const updatedResult = await client.query<FollowUpRow>(`${followUpSelect} WHERE f.id = $1`, [input.followUpId]);
       const updated = updatedResult.rows[0];
       if (!updated) return null;
+      await appendFollowUpActivity(client, input.followUpId, input.setterId, "FOLLOW_UP_CONVERTED_TO_APPOINTMENT", { followUpId: input.followUpId, appointmentId: appointment.id }, input.isTestData);
       await appendActivity(client, current.lead_id, input.setterId, "FOLLOW_UP_CONVERTED_TO_APPOINTMENT", { followUpId: input.followUpId, appointmentId: appointment.id });
       return { followUp: toFollowUp(updated), appointment };
     });
@@ -1200,6 +1360,7 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
       const activities = await deleted("activities");
       const billMetadata = await deleted("bill_attachments");
       const notes = await deleted("notes");
+      await deleted("follow_up_activities");
       const followUps = await deleted("follow_ups");
       const appointments = await deleted("appointments");
       // QA appointments can share non-test operational slots. Rebuild those
@@ -1237,7 +1398,19 @@ interface NoteRow { id: string; lead_id: string; appointment_id: string | null; 
 interface BillRow { id: string; lead_id: string; uploaded_by: string | null; storage_key: string; file_name: string; mime_type: string; file_size_bytes: number | string; replaced_by: string | null; replaced_at: string | Date | null; created_at: string | Date; }
 interface ActivityRow { id: string; lead_id: string; actor_id: string | null; actor_name?: string | null; event_type: string; event_json: unknown; created_at: string | Date; }
 interface SyncRow { id: string; lead_id: string; status: "PENDING" | "SYNCED" | "FAILED"; attempts: number | string; last_synced_at: string | Date | null; last_error: string | null; next_attempt_at: string | Date | null; updated_at: string | Date; }
-interface FollowUpRow { id: string; lead_id: string; owner_user_id: string; due_at: string | Date; reason: string; note: string; status: FieldFollowUpStatus; created_by: string | null; created_at: string | Date; completed_at: string | Date | null; updated_at: string | Date; converted_appointment_id: string | null; homeowner_name: string; address_line1: string; phone: string | null; }
+interface FollowUpRow {
+  id: string; lead_id: string | null; team_id: string | null; owner_user_id: string; due_at: string | Date | null; due_daypart: string | null;
+  reason: string; note: string; status: FieldFollowUpStatus; created_by: string | null; created_at: string | Date;
+  completed_at: string | Date | null; updated_at: string | Date; converted_appointment_id: string | null; converted_lead_id: string | null;
+  homeowner_name: string; address_line1: string; phone: string | null; email: string | null; city: string | null; state: string | null;
+  postal_code: string | null; latitude: number | string | null; longitude: number | string | null; activities: unknown;
+}
+interface FollowUpConversionRow {
+  id: string; lead_id: string | null; team_id: string | null; owner_user_id: string; due_at: string | Date | null; due_daypart: string | null;
+  reason: string; note: string; homeowner_name: string; phone: string | null; email: string | null; address_line1: string;
+  city: string | null; state: string | null; postal_code: string | null; latitude: number | string | null; longitude: number | string | null;
+  status: FieldFollowUpStatus; converted_lead_id: string | null; is_test_data: boolean;
+}
 
 function scopeFilter(alias: string, scope: FieldListScope, userId: string, teamIds: string[] | null, userParam: number): { sql: string; params: unknown[] } {
   const own = alias === "l"
@@ -1260,13 +1433,24 @@ function followUpScopeFilter(scope: FieldListScope, userId: string, teamIds: str
   if (scope === "all") return { sql: "TRUE", params: [] };
   if (scope === "team") {
     if (teamIds === null) return { sql: "TRUE", params: [] };
-    return teamIds.length > 0 ? { sql: "l.team_id = ANY($1::uuid[])", params: [teamIds] } : { sql: "FALSE", params: [] };
+    return teamIds.length > 0 ? { sql: "f.team_id = ANY($1::uuid[])", params: [teamIds] } : { sql: "FALSE", params: [] };
   }
   return { sql: "f.owner_user_id = $1", params: [userId] };
 }
 
 async function appendActivity(client: SqlClient, leadId: string, actorId: string, eventType: string, event: unknown, isTestData = false): Promise<void> {
   await client.query(`INSERT INTO field_ops.activities (id, lead_id, actor_id, event_type, event_json, is_test_data) VALUES ($1, $2, $3, $4, $5::jsonb, $6)`, [randomUUID(), leadId, actorId, eventType, JSON.stringify(event ?? {}), Boolean(isTestData)]);
+}
+
+async function appendFollowUpActivity(client: SqlClient, followUpId: string, actorId: string, eventType: string, event: unknown, isTestData = false): Promise<void> {
+  await client.query(`INSERT INTO field_ops.follow_up_activities (id, follow_up_id, actor_id, event_type, event_json, is_test_data) VALUES ($1, $2, $3, $4, $5::jsonb, $6)`, [randomUUID(), followUpId, actorId, eventType, JSON.stringify(event ?? {}), Boolean(isTestData)]);
+}
+
+async function insertLeadNote(client: SqlClient, leadId: string, authorId: string, body: string, isTestData = false): Promise<void> {
+  await client.query(
+    `INSERT INTO field_ops.notes (id, lead_id, author_id, kind, body, is_test_data) VALUES ($1, $2, $3, 'TEXT', $4, $5)`,
+    [randomUUID(), leadId, authorId, body, Boolean(isTestData)],
+  );
 }
 
 async function queueSync(client: SqlClient, leadId: string, isTestData = false): Promise<void> {
@@ -1297,10 +1481,10 @@ async function releaseOperationalSlot(client: SqlClient, id: string): Promise<vo
 }
 
 function toLead(row: LeadRow): FieldLead {
-  return { id: row.id, propertyId: row.property_id, setterId: row.setter_id, currentCloserId: row.current_closer_id, createdByUserId: row.created_by_user_id, teamId: row.team_id, homeownerName: row.homeowner_name, phone: row.phone, email: row.email, addressLine1: row.address_line1, city: row.city, state: row.state, postalCode: row.postal_code, latitude: numberOrNull(row.latitude), longitude: numberOrNull(row.longitude), utility: row.utility, supplier: row.supplier, approximateMonthlyBill: numberOrNull(row.approximate_monthly_bill), qualification: parseJson(row.qualification_json), status: row.status, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
+  return { id: row.id, sourceFollowUpId: row.source_follow_up_id ?? null, propertyId: row.property_id, setterId: row.setter_id, currentCloserId: row.current_closer_id, createdByUserId: row.created_by_user_id, teamId: row.team_id, homeownerName: row.homeowner_name, phone: row.phone, email: row.email, addressLine1: row.address_line1, city: row.city, state: row.state, postalCode: row.postal_code, latitude: numberOrNull(row.latitude), longitude: numberOrNull(row.longitude), utility: row.utility, supplier: row.supplier, approximateMonthlyBill: numberOrNull(row.approximate_monthly_bill), qualification: parseJson(row.qualification_json), status: row.status, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
 }
 function toAppointment(row: AppointmentRow): FieldAppointment {
-  return { id: row.id, leadId: row.lead_id, setterId: row.setter_id, closerId: row.closer_id, teamId: row.team_id, availabilitySlotId: row.availability_slot_id ?? null, operationalSlotId: row.operational_slot_id ?? null, isOverflow: Boolean(row.is_overflow), scheduledStart: iso(row.scheduled_start), scheduledEnd: iso(row.scheduled_end), timezone: row.timezone, appointmentType: row.appointment_type, status: row.status, outcome: row.outcome, outcomeNotes: row.outcome_notes, startedAt: iso(row.started_at), completedAt: iso(row.completed_at), assignedAt: iso(row.assigned_at), assignedBy: row.assigned_by, notes: row.notes, cancelReason: row.cancel_reason ?? null, cancelledAt: iso(row.cancelled_at ?? null), cancelledBy: row.cancelled_by ?? null, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
+  return { id: row.id, leadId: row.lead_id, setterId: row.setter_id, closerId: row.closer_id, teamId: row.team_id, availabilitySlotId: row.availability_slot_id ?? null, operationalSlotId: row.operational_slot_id ?? null, isOverflow: Boolean(row.is_overflow), scheduledStart: iso(row.scheduled_start), scheduledEnd: iso(row.scheduled_end), timezone: row.timezone, appointmentType: row.appointment_type, status: row.status, outcome: row.outcome, outcomeNotes: row.outcome_notes, startedAt: iso(row.started_at), completedAt: iso(row.completed_at), assignedAt: iso(row.assigned_at), assignedBy: row.assigned_by, notes: row.notes, cancelReason: row.cancel_reason ?? null, cancelledAt: iso(row.cancelled_at ?? null), cancelledBy: row.cancelled_by ?? null, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), homeownerName: row.homeowner_name ?? null, addressLine1: row.address_line1 ?? null, city: row.city ?? null, state: row.state ?? null, postalCode: row.postal_code ?? null, setterName: row.setter_name ?? null, closerName: row.closer_name ?? null, hasBill: row.has_bill == null ? undefined : Boolean(row.has_bill) };
 }
 function toAvailability(row: AvailabilityRow): FieldAvailabilitySlot { return { id: row.id, closerId: row.closer_id, closerName: row.closer_name.trim(), slotStart: iso(row.slot_start), slotEnd: iso(row.slot_end), timezone: row.timezone, capacity: Number(row.capacity), bookedCount: Number(row.booked_count), status: row.status, note: row.note }; }
 function toOperationalSlot(row: OperationalSlotRow): FieldOperationalSlot {
@@ -1329,7 +1513,20 @@ function toNote(row: NoteRow): FieldNote { return { id: row.id, leadId: row.lead
 function toBill(row: BillRow): FieldBillAttachment { return { id: row.id, leadId: row.lead_id, uploadedBy: row.uploaded_by, storageKey: row.storage_key, fileName: row.file_name, mimeType: row.mime_type, fileSizeBytes: Number(row.file_size_bytes), replacedBy: row.replaced_by, replacedAt: iso(row.replaced_at), createdAt: iso(row.created_at) }; }
 function toActivity(row: ActivityRow): FieldActivity { return { id: row.id, leadId: row.lead_id, actorId: row.actor_id, actorName: row.actor_name ?? null, eventType: row.event_type, event: parseJson(row.event_json), createdAt: iso(row.created_at) }; }
 function toSync(row: SyncRow): FieldSheetSyncJob { return { id: row.id, leadId: row.lead_id, status: row.status, attempts: Number(row.attempts), lastSyncedAt: iso(row.last_synced_at), lastError: row.last_error, nextAttemptAt: iso(row.next_attempt_at), updatedAt: iso(row.updated_at) }; }
-function toFollowUp(row: FollowUpRow): FieldFollowUp { return { id: row.id, leadId: row.lead_id, ownerUserId: row.owner_user_id, dueAt: iso(row.due_at), reason: row.reason, note: row.note ?? "", status: row.status, createdBy: row.created_by, createdAt: iso(row.created_at), completedAt: iso(row.completed_at), updatedAt: iso(row.updated_at), convertedAppointmentId: row.converted_appointment_id, homeownerName: row.homeowner_name ?? "", addressLine1: row.address_line1 ?? "", phone: row.phone ?? null }; }
+function toFollowUp(row: FollowUpRow): FieldFollowUp {
+  const activities = parseJson(row.activities);
+  return {
+    id: row.id, leadId: row.lead_id, teamId: row.team_id, convertedLeadId: row.converted_lead_id, ownerUserId: row.owner_user_id,
+    dueAt: iso(row.due_at), dueDaypart: row.due_daypart ?? null, reason: row.reason, note: row.note ?? "", status: row.status,
+    createdBy: row.created_by, createdAt: iso(row.created_at), completedAt: iso(row.completed_at), updatedAt: iso(row.updated_at),
+    convertedAppointmentId: row.converted_appointment_id, homeownerName: row.homeowner_name ?? "", addressLine1: row.address_line1 ?? "",
+    phone: row.phone ?? null, email: row.email ?? null, city: row.city ?? null, state: row.state ?? null, postalCode: row.postal_code ?? null,
+    latitude: numberOrNull(row.latitude), longitude: numberOrNull(row.longitude), activities: Array.isArray(activities) ? activities.map((activity) => {
+      const value = activity as Record<string, unknown>;
+      return { id: String(value.id ?? ""), followUpId: String(value.followUpId ?? row.id), actorId: typeof value.actorId === "string" ? value.actorId : null, eventType: String(value.eventType ?? "ACTIVITY"), event: value.event ?? {}, createdAt: iso(String(value.createdAt ?? row.created_at)) };
+    }) : [],
+  };
+}
 function iso(value: string | Date): string;
 function iso(value: string | Date | null): string | null;
 function iso(value: string | Date | null): string | null { if (value == null) return null; const date = value instanceof Date ? value : new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toISOString(); }

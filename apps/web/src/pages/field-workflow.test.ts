@@ -67,6 +67,26 @@ test("field operations does not use the legacy filename-only bill path", async (
   assert.match(source, /No eligible closer covers this appointment yet/);
 });
 
+test("manager appointments use a responsive row-level assignment board", async () => {
+  const source = await readFile(new URL("./Appointments.vue", import.meta.url), "utf8");
+
+  assert.match(source, /Appointment assignment/);
+  assert.match(source, /Time/);
+  assert.match(source, /Customer/);
+  assert.match(source, /City/);
+  assert.match(source, /Setter/);
+  assert.match(source, /Bill/);
+  assert.match(source, /Closer/);
+  assert.match(source, /Result/);
+  assert.match(source, /getAvailableFieldClosers/);
+  assert.match(source, /Assigning…/);
+  assert.match(source, /md:hidden/);
+  assert.match(source, /Need assignment/);
+  assert.match(source, /Upcoming/);
+  assert.match(source, /timeFilter/);
+  assert.match(source, /downloadFieldBill/);
+});
+
 test("lead detail exposes audited note edits and canonical activity", async () => {
   const source = await readFile(new URL("./LeadDetail.vue", import.meta.url), "utf8");
 

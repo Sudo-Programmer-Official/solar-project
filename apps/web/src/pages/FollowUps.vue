@@ -1,38 +1,55 @@
 <template>
-  <main class="px-4 pb-28">
-    <MobileHeader eyebrow="FOLLOW-UPS" title="Reconnect at the right time" subtitle="Keep future opportunities separate from scheduled appointments, then convert them when the homeowner is ready.">
-      <template #action><button class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600" type="button" @click="load">Refresh</button></template>
+  <main class="overflow-x-hidden px-4 pb-28">
+    <MobileHeader eyebrow="FOLLOW-UPS" title="Reconnect when they are ready" subtitle="Keep early homeowner conversations out of the lead pipeline until you are ready to promote them.">
+      <template #action><button class="min-h-touch rounded-full border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700" type="button" @click="load">Refresh</button></template>
     </MobileHeader>
 
-    <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">Follow-ups unavailable</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p></section>
+    <section class="page-surface border-primary-100 bg-primary-50/60 p-4 sm:p-5">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div><p class="field-label text-primary-700">PRE-LEAD WORKSPACE</p><h2 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Setter follow-ups</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Capture the next conversation from the doorstep, then create one canonical lead when the homeowner is ready.</p></div>
+        <button class="min-h-touch rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm" type="button" @click="showCreate = !showCreate">{{ showCreate ? "Close form" : "+ New follow-up" }}</button>
+      </div>
+      <div class="mt-4 grid grid-cols-3 gap-2 sm:max-w-xl">
+        <div class="rounded-2xl bg-white px-3 py-3"><p class="text-xs text-slate-500">Needs attention</p><strong class="mt-1 block text-xl text-amber-700">{{ overdueCount + todayCount }}</strong></div>
+        <div class="rounded-2xl bg-white px-3 py-3"><p class="text-xs text-slate-500">Open</p><strong class="mt-1 block text-xl text-slate-950">{{ activeCount }}</strong></div>
+        <div class="rounded-2xl bg-white px-3 py-3"><p class="text-xs text-slate-500">Completed</p><strong class="mt-1 block text-xl text-slate-950">{{ completedCount }}</strong></div>
+      </div>
+    </section>
 
-    <section v-if="user.can('followup:create') && leads.length" class="page-surface p-4">
-      <p class="field-label text-primary-600">NEW REMINDER</p>
-      <h2 class="mt-1 text-lg font-semibold text-slate-900">Create a follow-up</h2>
-      <form class="mt-4 grid gap-2 sm:grid-cols-2" @submit.prevent="create">
-        <select v-model="draft.leadId" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3 text-sm" required><option value="">Select homeowner</option><option v-for="lead in leads" :key="lead.id" :value="lead.id">{{ lead.homeownerName }} · {{ lead.addressLine1 }}</option></select>
-        <input v-model="draft.dueAt" class="min-h-touch rounded-2xl border border-slate-200 px-3 text-sm" type="datetime-local" required />
-        <select v-model="draft.reason" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3 text-sm"><option value="">Choose a reason</option><option v-for="reason in reasons" :key="reason" :value="reason">{{ reason }}</option></select>
-        <input v-model="draft.customReason" class="min-h-touch rounded-2xl border border-slate-200 px-3 text-sm" placeholder="Or enter a reason" />
-        <textarea v-model="draft.note" class="min-h-20 rounded-2xl border border-slate-200 p-3 text-sm sm:col-span-2" placeholder="Context to remember later" />
-        <button class="touch-target rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2" :disabled="saving" type="submit">{{ saving ? "Saving…" : "Save reminder" }}</button>
+    <section v-if="error" class="page-surface mt-4 border-amber-200 bg-amber-50 p-4"><p class="field-label text-amber-700">FOLLOW-UPS UNAVAILABLE</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p></section>
+
+    <section v-if="showCreate" class="page-surface mt-4 p-4 sm:p-5">
+      <p class="field-label text-primary-600">NEW PRE-LEAD</p><h2 class="mt-1 text-xl font-semibold text-slate-950">Save a doorstep conversation</h2><p class="mt-2 text-sm text-slate-500">Name, phone, and email are optional. The address, schedule, reason, and context note are enough to save it.</p>
+      <form class="mt-5 grid gap-3 sm:grid-cols-2" @submit.prevent="create">
+        <label class="grid gap-1 text-sm font-medium text-slate-700"><span>Customer name <span class="font-normal text-slate-400">(optional)</span></span><input v-model="draft.homeownerName" class="min-h-touch rounded-2xl border border-slate-200 px-3" autocomplete="name" placeholder="Jordan Miller" /></label>
+        <label class="grid gap-1 text-sm font-medium text-slate-700"><span>Phone <span class="font-normal text-slate-400">(optional)</span></span><input v-model="draft.phone" class="min-h-touch rounded-2xl border border-slate-200 px-3" autocomplete="tel" inputmode="tel" placeholder="(555) 555-0123" /></label>
+        <label class="grid gap-1 text-sm font-medium text-slate-700"><span>Email <span class="font-normal text-slate-400">(optional)</span></span><input v-model="draft.email" class="min-h-touch rounded-2xl border border-slate-200 px-3" autocomplete="email" type="email" placeholder="jordan@example.com" /></label>
+        <label class="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2"><span>Property address</span><input v-model="draft.addressLine1" class="min-h-touch rounded-2xl border border-slate-200 px-3" autocomplete="street-address" placeholder="3306 Pleasant Valley Blvd" required /></label>
+        <label class="grid gap-1 text-sm font-medium text-slate-700"><span>City <span class="font-normal text-slate-400">(optional)</span></span><input v-model="draft.city" class="min-h-touch rounded-2xl border border-slate-200 px-3" placeholder="Altoona" /></label>
+        <div class="grid grid-cols-2 gap-3"><label class="grid gap-1 text-sm font-medium text-slate-700"><span>State</span><input v-model="draft.state" class="min-h-touch rounded-2xl border border-slate-200 px-3" placeholder="PA" /></label><label class="grid gap-1 text-sm font-medium text-slate-700"><span>ZIP</span><input v-model="draft.postalCode" class="min-h-touch rounded-2xl border border-slate-200 px-3" inputmode="numeric" placeholder="16602" /></label></div>
+        <label class="grid gap-1 text-sm font-medium text-slate-700"><span>Follow-up date</span><input v-model="draft.date" class="min-h-touch rounded-2xl border border-slate-200 px-3" type="date" required /></label>
+        <div class="grid grid-cols-2 gap-3"><label class="grid gap-1 text-sm font-medium text-slate-700"><span>Exact time <span class="font-normal text-slate-400">(optional)</span></span><input v-model="draft.time" class="min-h-touch rounded-2xl border border-slate-200 px-3" type="time" /></label><label class="grid gap-1 text-sm font-medium text-slate-700"><span>Daypart</span><select v-model="draft.daypart" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3" :required="!draft.time"><option value="">Choose</option><option v-for="part in dayparts" :key="part.value" :value="part.value">{{ part.label }}</option></select></label></div>
+        <label class="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2"><span>Reason</span><select v-model="draft.reason" class="min-h-touch rounded-2xl border border-slate-200 bg-white px-3" required><option value="">Choose a reason</option><option v-for="reason in reasons" :key="reason" :value="reason">{{ reason }}</option></select></label>
+        <label v-if="draft.reason === 'Other'" class="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2"><span>Other reason</span><input v-model="draft.otherReason" class="min-h-touch rounded-2xl border border-slate-200 px-3" placeholder="What should the setter remember?" required /></label>
+        <label class="grid gap-1 text-sm font-medium text-slate-700 sm:col-span-2"><span>Context note</span><textarea v-model="draft.note" class="min-h-24 rounded-2xl border border-slate-200 p-3" placeholder="What did they say, and what should happen next?" required /></label>
+        <button class="min-h-touch rounded-2xl bg-primary-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-2" :disabled="saving" type="submit">{{ saving ? "Saving…" : "Save follow-up" }}</button>
       </form>
     </section>
 
-    <section v-for="group in groups" :key="group.id" class="page-surface mt-4 p-4">
-      <div class="flex items-center justify-between gap-3"><div><p class="field-label">{{ group.label }}</p><h2 class="mt-1 text-lg font-semibold text-slate-900">{{ group.items.length }} {{ group.items.length === 1 ? 'follow-up' : 'follow-ups' }}</h2></div><span v-if="group.id === 'today'" class="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-800">Needs attention</span></div>
-      <div v-if="group.items.length === 0" class="mt-3 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Nothing here.</div>
-      <div v-else class="mt-3 grid gap-3">
-        <article v-for="followUp in group.items" :key="followUp.id" class="rounded-2xl border border-slate-200 p-4">
-          <div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate text-sm font-semibold text-slate-900">{{ followUp.homeownerName }}</p><p class="mt-1 truncate text-xs text-slate-500">{{ followUp.addressLine1 }}</p></div><span class="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-600">{{ followUp.status.replaceAll('_', ' ') }}</span></div>
-          <p class="mt-3 text-sm font-semibold text-slate-800">{{ followUp.reason }}</p><p v-if="followUp.note" class="mt-1 text-sm text-slate-600">{{ followUp.note }}</p><p class="mt-2 text-xs text-slate-500">Due {{ formatDateTime(followUp.dueAt) }}</p>
-          <div v-if="isOpen(followUp)" class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-            <input v-model="snoozeDraft[followUp.id]" class="min-h-touch rounded-2xl border border-slate-200 px-3 text-xs" type="datetime-local" />
-            <button class="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50" :disabled="!snoozeDraft[followUp.id]" type="button" @click="snooze(followUp)">Snooze</button>
-            <button class="rounded-2xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white" type="button" @click="complete(followUp)">Complete</button>
-          </div>
-          <div v-if="isOpen(followUp) && user.can('appointment:create')" class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]"><select v-model="convertDraft[followUp.id]" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-xs"><option value="">Select appointment slot</option><option v-for="slot in slots" :key="slot.id" :value="slot.id">{{ formatDateTime(slot.slotStart) }} · {{ slot.bookedCount }}/{{ slot.standardCapacity }} booked</option></select><button class="rounded-2xl bg-primary-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50" :disabled="!convertDraft[followUp.id] || (selectedSlot(followUp.id)?.remainingCapacity === 0 && !overflowDraft[followUp.id])" type="button" @click="convert(followUp)">Create appointment</button><label v-if="selectedSlot(followUp.id)?.remainingCapacity === 0 && selectedSlot(followUp.id)?.overflowPolicy === 'ALLOW_WITH_WARNING'" class="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 sm:col-span-2"><input v-model="overflowDraft[followUp.id]" class="mt-0.5" type="checkbox" /> <span>Confirm explicit overflow booking.</span></label></div>
-          <RouterLink class="mt-3 inline-block text-xs font-semibold text-primary-700" :to="`/leads/${followUp.leadId}`">Open homeowner →</RouterLink>
+    <nav class="page-surface mt-4 grid grid-cols-2 gap-2 p-2 sm:grid-cols-4" aria-label="Follow-up views"><button v-for="tab in tabs" :key="tab.id" class="min-h-touch rounded-2xl px-3 py-3 text-left transition" :class="activeView === tab.id ? 'bg-slate-950 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'" type="button" @click="activeView = tab.id"><span class="block text-xs font-semibold uppercase tracking-[0.16em]">{{ tab.label }}</span><strong class="mt-1 block text-xl">{{ tab.count }}</strong></button></nav>
+
+    <section class="page-surface mt-4 p-4 sm:p-5">
+      <div class="flex items-start justify-between gap-3"><div><p class="field-label">{{ currentTab.label }}</p><h2 class="mt-1 text-xl font-semibold text-slate-950">{{ viewItems.length }} {{ viewItems.length === 1 ? "follow-up" : "follow-ups" }}</h2></div><span v-if="activeView === 'overdue' || activeView === 'today'" class="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">Priority view</span></div>
+      <div v-if="viewItems.length === 0" class="mt-4 rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">No follow-ups in this view.</div>
+      <div v-else class="mt-4 grid gap-3">
+        <article v-for="followUp in viewItems" :key="followUp.id" class="overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate text-base font-semibold text-slate-950">{{ displayName(followUp) }}</p><p class="mt-1 break-words text-sm text-slate-600">{{ addressLabel(followUp) }}</p></div><span class="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide" :class="statusClass(followUp)">{{ statusLabel(followUp.status) }}</span></div>
+          <div class="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end"><div><p class="text-sm font-semibold text-slate-800">{{ formatDue(followUp) }}</p><p class="mt-1 text-sm text-slate-500">{{ followUp.reason }}</p></div><span v-if="followUp.convertedLeadId" class="text-xs font-semibold text-emerald-700">Lead created</span></div>
+          <p v-if="latestNote(followUp)" class="mt-3 rounded-xl bg-slate-50 p-3 text-sm leading-5 text-slate-700">{{ latestNote(followUp) }}</p>
+          <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"><a v-if="followUp.phone" class="min-h-touch inline-flex items-center justify-center rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" :href="`tel:${followUp.phone}`">Call</a><span v-else class="inline-flex min-h-touch items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-400">No phone</span><button class="min-h-touch rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700" type="button" @click="navigate(followUp)">Navigate</button><button v-if="isOpen(followUp)" class="min-h-touch rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700" type="button" @click="complete(followUp)">Complete</button><button v-if="canReschedule(followUp)" class="min-h-touch rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700" type="button" @click="toggleReschedule(followUp)">{{ rescheduleOpen[followUp.id] ? "Close" : "Reschedule" }}</button><button class="min-h-touch rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700" type="button" @click="toggleNote(followUp)">{{ noteOpen[followUp.id] ? "Close" : "Add note" }}</button><button v-if="!followUp.convertedLeadId && followUp.status !== 'CONVERTED_TO_APPOINTMENT'" class="min-h-touch bg-primary-600 rounded-xl px-3 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 sm:col-span-2" :disabled="converting[followUp.id]" type="button" @click="convert(followUp)">{{ converting[followUp.id] ? "Creating lead…" : "Create Lead" }}</button><RouterLink v-else-if="followUp.convertedLeadId" class="min-h-touch inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white sm:col-span-2" :to="`/leads/${followUp.convertedLeadId}`">Open lead</RouterLink></div>
+          <form v-if="rescheduleOpen[followUp.id]" class="mt-3 grid gap-2 rounded-2xl bg-slate-50 p-3 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end" @submit.prevent="reschedule(followUp)"><label class="grid gap-1 text-xs font-semibold text-slate-600"><span>Date</span><input v-model="rescheduleDraft[followUp.id].date" class="min-h-touch rounded-xl border border-slate-200 bg-white px-2" type="date" required /></label><label class="grid gap-1 text-xs font-semibold text-slate-600"><span>Time</span><input v-model="rescheduleDraft[followUp.id].time" class="min-h-touch rounded-xl border border-slate-200 bg-white px-2" type="time" /></label><label class="grid gap-1 text-xs font-semibold text-slate-600"><span>Daypart</span><select v-model="rescheduleDraft[followUp.id].daypart" class="min-h-touch rounded-xl border border-slate-200 bg-white px-2" :required="!rescheduleDraft[followUp.id].time"><option value="">Choose</option><option v-for="part in dayparts" :key="part.value" :value="part.value">{{ part.label }}</option></select></label><button class="min-h-touch rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="saving" type="submit">Save</button></form>
+          <form v-if="noteOpen[followUp.id]" class="mt-3 grid gap-2 rounded-2xl bg-slate-50 p-3 sm:grid-cols-[1fr_auto] sm:items-end" @submit.prevent="addNote(followUp)"><label class="grid gap-1 text-xs font-semibold text-slate-600"><span>New activity note</span><textarea v-model="noteDraft[followUp.id]" class="min-h-20 rounded-xl border border-slate-200 bg-white p-2" placeholder="What changed?" required /></label><button class="min-h-touch rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="saving" type="submit">Save note</button></form>
+          <details v-if="followUp.activities.length" class="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-3"><summary class="cursor-pointer text-sm font-semibold text-slate-700">Activity history · {{ followUp.activities.length }}</summary><ol class="mt-3 grid gap-3 border-l border-slate-200 pl-4"><li v-for="activity in followUp.activities" :key="activity.id" class="relative text-sm"><span class="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-primary-500"></span><p class="font-medium text-slate-700">{{ activityLabel(activity) }}</p><p class="mt-0.5 text-xs text-slate-500">{{ formatActivityDate(activity.createdAt) }}</p></li></ol></details>
         </article>
       </div>
     </section>
@@ -43,56 +60,77 @@
 import { computed, ref } from "vue";
 import MobileHeader from "../components/MobileHeader.vue";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
-import { completeFieldFollowUp, convertFieldFollowUpToOperationalSlot, createFieldFollowUp, getFieldOperationalSlots, getFieldFollowUps, getFieldLeads, snoozeFieldFollowUp, type FieldFollowUp, type FieldLead, type FieldOperationalSlot } from "../services/api";
-import { useUserStore } from "../stores/user.store";
+import { addFieldFollowUpNote, completeFieldFollowUp, convertFieldFollowUpToLead, createFieldFollowUp, getFieldFollowUps, rescheduleFieldFollowUp, type FieldFollowUp, type FieldFollowUpActivity } from "../services/api";
 
-const user = useUserStore();
+type ViewId = "overdue" | "today" | "upcoming" | "completed";
+type Daypart = "MORNING" | "AFTERNOON" | "EVENING";
+type Draft = { homeownerName: string; phone: string; email: string; addressLine1: string; city: string; state: string; postalCode: string; date: string; time: string; daypart: string; reason: string; otherReason: string; note: string };
+type ScheduleDraft = { date: string; time: string; daypart: string };
+type ActivityEvent = { body?: unknown; dueAt?: unknown; dueDaypart?: unknown; leadId?: unknown };
+
+const reasons = ["Need bill", "New roof", "Spouse/decision maker", "Call back", "Not home", "Thinking about it", "Credit timing", "Future interest", "Other"];
+const dayparts: Array<{ value: Daypart; label: string }> = [{ value: "MORNING", label: "Morning" }, { value: "AFTERNOON", label: "Afternoon" }, { value: "EVENING", label: "Evening" }];
 const followUps = ref<FieldFollowUp[]>([]);
-const leads = ref<FieldLead[]>([]);
-const slots = ref<FieldOperationalSlot[]>([]);
 const error = ref("");
 const saving = ref(false);
-const snoozeDraft = ref<Record<string, string>>({});
-const convertDraft = ref<Record<string, string>>({});
-const overflowDraft = ref<Record<string, boolean>>({});
-const draft = ref({ leadId: "", dueAt: "", reason: "", customReason: "", note: "" });
-const reasons = ["New roof in progress", "Homeowner traveling", "Credit improvement", "Spouse unavailable", "Callback requested", "Utility bill availability"];
+const showCreate = ref(false);
+const activeView = ref<ViewId>("today");
+const converting = ref<Record<string, boolean>>({});
+const rescheduleOpen = ref<Record<string, boolean>>({});
+const noteOpen = ref<Record<string, boolean>>({});
+const rescheduleDraft = ref<Record<string, ScheduleDraft>>({});
+const noteDraft = ref<Record<string, string>>({});
+const draft = ref<Draft>({ homeownerName: "", phone: "", email: "", addressLine1: "", city: "", state: "", postalCode: "", date: todayInput(), time: "", daypart: "AFTERNOON", reason: "", otherReason: "", note: "" });
 
-const groups = computed(() => {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
-  const active = followUps.value.filter(isOpen);
-  const completed = followUps.value.filter((item) => !isOpen(item));
-  return [
-    { id: "today", label: "TODAY", items: active.filter((item) => new Date(item.dueAt) < tomorrow && new Date(item.dueAt) >= today) },
-    { id: "upcoming", label: "UPCOMING", items: active.filter((item) => new Date(item.dueAt) >= tomorrow) },
-    { id: "overdue", label: "OVERDUE", items: active.filter((item) => new Date(item.dueAt) < today) },
-    { id: "completed", label: "COMPLETED", items: completed },
-  ];
-});
+const activeFollowUps = computed(() => followUps.value.filter(isOpen));
+const completedItems = computed(() => followUps.value.filter((item) => !isOpen(item)));
+const overdueItems = computed(() => activeFollowUps.value.filter((item) => bucket(item) === "overdue"));
+const todayItems = computed(() => activeFollowUps.value.filter((item) => bucket(item) === "today"));
+const upcomingItems = computed(() => activeFollowUps.value.filter((item) => bucket(item) === "upcoming"));
+const overdueCount = computed(() => overdueItems.value.length);
+const todayCount = computed(() => todayItems.value.length);
+const activeCount = computed(() => activeFollowUps.value.length);
+const completedCount = computed(() => completedItems.value.length);
+const tabs = computed(() => [{ id: "overdue" as ViewId, label: "Overdue", count: overdueCount.value }, { id: "today" as ViewId, label: "Today", count: todayCount.value }, { id: "upcoming" as ViewId, label: "Upcoming", count: upcomingItems.value.length }, { id: "completed" as ViewId, label: "Completed", count: completedCount.value }]);
+const currentTab = computed(() => tabs.value.find((tab) => tab.id === activeView.value) ?? tabs.value[1]);
+const viewItems = computed(() => activeView.value === "overdue" ? sortActive(overdueItems.value) : activeView.value === "today" ? sortActive(todayItems.value) : activeView.value === "upcoming" ? sortActive(upcomingItems.value) : [...completedItems.value].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()));
 
 useOperationalRefresh(load);
 
-async function load() {
-  error.value = "";
-  const results = await Promise.allSettled([getFieldFollowUps(), getFieldLeads(), user.can("appointment:create") ? getFieldOperationalSlots() : Promise.resolve([] as FieldOperationalSlot[])]);
-  if (results[0].status === "fulfilled") followUps.value = results[0].value;
-  if (results[1].status === "fulfilled") leads.value = results[1].value;
-  if (results[2].status === "fulfilled") slots.value = results[2].value;
-  if (results[0].status === "rejected") error.value = results[0].reason instanceof Error ? results[0].reason.message : "Unable to load follow-ups.";
-}
-
+async function load() { error.value = ""; try { followUps.value = await getFieldFollowUps(); if (overdueItems.value.length > 0) activeView.value = "overdue"; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to load follow-ups."; } }
 async function create() {
-  const reason = draft.value.customReason.trim() || draft.value.reason;
-  if (!draft.value.leadId || !draft.value.dueAt || !reason) return;
+  const reason = draft.value.reason === "Other" ? draft.value.otherReason.trim() : draft.value.reason;
+  if (!draft.value.addressLine1.trim() || !draft.value.date || !reason || !draft.value.note.trim() || (!draft.value.time && !draft.value.daypart)) return;
   saving.value = true; error.value = "";
-  try { const created = await createFieldFollowUp({ leadId: draft.value.leadId, dueAt: new Date(draft.value.dueAt).toISOString(), reason, note: draft.value.note.trim() || undefined }); followUps.value = [created, ...followUps.value]; draft.value = { leadId: "", dueAt: "", reason: "", customReason: "", note: "" }; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create follow-up."; } finally { saving.value = false; }
+  try {
+    const created = await createFieldFollowUp({ homeownerName: draft.value.homeownerName.trim() || null, phone: draft.value.phone.trim() || null, email: draft.value.email.trim() || null, addressLine1: draft.value.addressLine1.trim(), city: draft.value.city.trim() || null, state: draft.value.state.trim() || null, postalCode: draft.value.postalCode.trim() || null, dueAt: scheduleIso(draft.value.date, draft.value.time), dueDaypart: draft.value.time ? null : draft.value.daypart, reason, note: draft.value.note.trim() });
+    followUps.value = [created, ...followUps.value]; activeView.value = bucket(created) === "overdue" ? "overdue" : bucket(created) === "today" ? "today" : "upcoming"; draft.value = { homeownerName: "", phone: "", email: "", addressLine1: "", city: "", state: "", postalCode: "", date: todayInput(), time: "", daypart: "AFTERNOON", reason: "", otherReason: "", note: "" }; showCreate.value = false;
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create follow-up."; } finally { saving.value = false; }
 }
-async function complete(followUp: FieldFollowUp) { try { replace(await completeFieldFollowUp(followUp.id)); } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to complete follow-up."; } }
-async function snooze(followUp: FieldFollowUp) { const value = snoozeDraft.value[followUp.id]; if (!value) return; try { replace(await snoozeFieldFollowUp(followUp.id, new Date(value).toISOString())); snoozeDraft.value[followUp.id] = ""; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to snooze follow-up."; } }
-async function convert(followUp: FieldFollowUp) { const slotId = convertDraft.value[followUp.id]; if (!slotId) return; try { const result = await convertFieldFollowUpToOperationalSlot(followUp.id, slotId, overflowDraft.value[followUp.id] === true); replace(result.followUp); } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create appointment."; } }
-function selectedSlot(id: string) { return slots.value.find((slot) => slot.id === convertDraft.value[id]); }
+async function complete(followUp: FieldFollowUp) { await runAction(() => completeFieldFollowUp(followUp.id), "Unable to complete follow-up."); }
+async function reschedule(followUp: FieldFollowUp) { const value = rescheduleDraft.value[followUp.id]; if (!value?.date || (!value.time && !value.daypart)) return; await runAction(() => rescheduleFieldFollowUp(followUp.id, { dueAt: scheduleIso(value.date, value.time), dueDaypart: value.time ? null : value.daypart }), "Unable to reschedule follow-up."); rescheduleOpen.value[followUp.id] = false; }
+async function addNote(followUp: FieldFollowUp) { const body = noteDraft.value[followUp.id]?.trim(); if (!body) return; await runAction(() => addFieldFollowUpNote(followUp.id, body), "Unable to add note."); noteDraft.value[followUp.id] = ""; noteOpen.value[followUp.id] = false; }
+async function convert(followUp: FieldFollowUp) { if (followUp.convertedLeadId) return; converting.value[followUp.id] = true; error.value = ""; try { const result = await convertFieldFollowUpToLead(followUp.id); replace(result.followUp); activeView.value = "completed"; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create lead from follow-up."; } finally { converting.value[followUp.id] = false; } }
+async function runAction(action: () => Promise<FieldFollowUp>, fallback: string) { saving.value = true; error.value = ""; try { replace(await action()); } catch (cause) { error.value = cause instanceof Error ? cause.message : fallback; } finally { saving.value = false; } }
+function toggleReschedule(followUp: FieldFollowUp) { rescheduleOpen.value[followUp.id] = !rescheduleOpen.value[followUp.id]; if (rescheduleOpen.value[followUp.id]) { const due = followUp.dueAt ? new Date(followUp.dueAt) : new Date(); rescheduleDraft.value[followUp.id] = { date: localDateInput(due), time: followUp.dueDaypart ? "" : localTimeInput(due), daypart: followUp.dueDaypart ?? "AFTERNOON" }; } }
+function toggleNote(followUp: FieldFollowUp) { noteOpen.value[followUp.id] = !noteOpen.value[followUp.id]; }
 function replace(updated: FieldFollowUp) { followUps.value = followUps.value.map((item) => item.id === updated.id ? updated : item); }
 function isOpen(item: FieldFollowUp) { return item.status === "OPEN" || item.status === "SNOOZED"; }
-function formatDateTime(value: string) { return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+function canReschedule(item: FieldFollowUp) { return item.status !== "CONVERTED" && item.status !== "CONVERTED_TO_APPOINTMENT"; }
+function displayName(item: FieldFollowUp) { return item.homeownerName || `Homeowner at ${item.addressLine1}`; }
+function addressLabel(item: FieldFollowUp) { return [item.addressLine1, item.city, item.state, item.postalCode].filter(Boolean).join(", "); }
+function statusLabel(status: string) { return status.replaceAll("_", " "); }
+function statusClass(item: FieldFollowUp) { return item.status === "DONE" || item.status === "CONVERTED" ? "bg-emerald-50 text-emerald-700" : item.status === "CANCELLED" ? "bg-slate-100 text-slate-500" : bucket(item) === "overdue" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"; }
+function latestNote(item: FieldFollowUp) { const notes = item.activities.filter((activity) => activity.eventType === "FOLLOW_UP_NOTE_ADDED").map((activity) => eventOf(activity).body).filter((body): body is string => typeof body === "string" && Boolean(body.trim())); return notes.at(-1) ?? item.note; }
+function formatDue(item: FieldFollowUp) { const day = item.dueAt ? new Date(item.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Date not set"; if (item.dueDaypart) return `${day} · ${item.dueDaypart.toLowerCase()}`; return item.dueAt ? new Date(item.dueAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : day; }
+function formatActivityDate(value: string) { return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+function eventOf(activity: FieldFollowUpActivity): ActivityEvent { return activity.event && typeof activity.event === "object" ? activity.event as ActivityEvent : {}; }
+function activityLabel(activity: FieldFollowUpActivity) { const event = eventOf(activity); if (activity.eventType === "FOLLOW_UP_CREATED") return "Follow-up created"; if (activity.eventType === "FOLLOW_UP_RESCHEDULED") return `Rescheduled${event.dueDaypart ? ` to ${String(event.dueDaypart).toLowerCase()}` : ""}`; if (activity.eventType === "FOLLOW_UP_NOTE_ADDED") return `Note added: ${String(event.body ?? "")}`; if (activity.eventType === "FOLLOW_UP_COMPLETED") return "Follow-up completed"; if (activity.eventType === "FOLLOW_UP_CONVERTED") return "Converted into a canonical lead"; if (activity.eventType === "FOLLOW_UP_CONVERTED_TO_APPOINTMENT") return "Converted into an appointment"; return statusLabel(activity.eventType); }
+function bucket(item: FieldFollowUp): ViewId { if (!isOpen(item)) return "completed"; if (!item.dueAt) return "upcoming"; const due = new Date(item.dueAt); const start = new Date(); start.setHours(0, 0, 0, 0); const tomorrow = new Date(start); tomorrow.setDate(tomorrow.getDate() + 1); return due < start ? "overdue" : due < tomorrow ? "today" : "upcoming"; }
+function sortActive(items: FieldFollowUp[]) { return [...items].sort((a, b) => (a.dueAt ? new Date(a.dueAt).getTime() : Number.MAX_SAFE_INTEGER) - (b.dueAt ? new Date(b.dueAt).getTime() : Number.MAX_SAFE_INTEGER)); }
+function navigate(item: FieldFollowUp) { const query = addressLabel(item); if (!query) return; window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer"); }
+function scheduleIso(date: string, time: string) { return new Date(`${date}T${time || "12:00"}`).toISOString(); }
+function todayInput() { return localDateInput(new Date()); }
+function localDateInput(value: Date) { const year = value.getFullYear(); const month = String(value.getMonth() + 1).padStart(2, "0"); const day = String(value.getDate()).padStart(2, "0"); return `${year}-${month}-${day}`; }
+function localTimeInput(value: Date) { return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`; }
 </script>

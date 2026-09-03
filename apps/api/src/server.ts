@@ -957,15 +957,27 @@ async function handleFieldRoute(
   }
   if (req.method === "POST" && path === "/api/v1/field/follow-ups") {
     const body = await readJson(req);
-    const followUp = await service.createFollowUp(user, requiredString(body?.leadId, "leadId"), {
-      dueAt: requiredString(body?.dueAt, "dueAt"),
+    const followUp = await service.createFollowUp(user, {
+      leadId: optionalString(body?.leadId),
+      teamId: optionalString(body?.teamId),
+      homeownerName: optionalString(body?.homeownerName),
+      phone: optionalString(body?.phone),
+      email: optionalString(body?.email),
+      addressLine1: optionalString(body?.addressLine1),
+      city: optionalString(body?.city),
+      state: optionalString(body?.state),
+      postalCode: optionalString(body?.postalCode),
+      latitude: optionalNumber(body?.latitude),
+      longitude: optionalNumber(body?.longitude),
+      dueAt: optionalString(body?.dueAt),
+      dueDaypart: optionalString(body?.dueDaypart),
       reason: requiredString(body?.reason, "reason"),
       note: optionalString(body?.note) ?? undefined,
     });
     sendJson(res, 201, { followUp }, corsHeaders);
     return;
   }
-  const followUpMatch = path.match(/^\/api\/v1\/field\/follow-ups\/([^/]+)(?:\/(snooze|complete|cancel|convert))?$/);
+  const followUpMatch = path.match(/^\/api\/v1\/field\/follow-ups\/([^/]+)(?:\/(reschedule|snooze|complete|cancel|convert|convert-to-lead|note))?$/);
   const followUpId = followUpMatch?.[1] ? decodeURIComponent(followUpMatch[1]) : null;
   const followUpAction = followUpMatch?.[2] ?? null;
   if (followUpId && req.method === "GET" && !followUpAction) {
@@ -974,7 +986,16 @@ async function handleFieldRoute(
   }
   if (followUpId && req.method === "POST" && followUpAction === "snooze") {
     const body = await readJson(req);
-    const followUp = await service.updateFollowUp(user, followUpId, { status: "SNOOZED", dueAt: requiredString(body?.dueAt, "dueAt") });
+    const followUp = await service.updateFollowUp(user, followUpId, { status: "SNOOZED", dueAt: requiredString(body?.dueAt, "dueAt"), dueDaypart: "" });
+    sendJson(res, 200, { followUp }, corsHeaders);
+    return;
+  }
+  if (followUpId && req.method === "POST" && followUpAction === "reschedule") {
+    const body = await readJson(req);
+    const dueAt = optionalString(body?.dueAt);
+    const dueDaypart = optionalString(body?.dueDaypart) ?? "";
+    if (!dueAt && !dueDaypart) throw new PlatformHttpError(400, "Choose a follow-up time or daypart.", "FOLLOW_UP_SCHEDULE_REQUIRED");
+    const followUp = await service.updateFollowUp(user, followUpId, { status: "SNOOZED", dueAt: dueAt ?? undefined, dueDaypart });
     sendJson(res, 200, { followUp }, corsHeaders);
     return;
   }
@@ -991,6 +1012,17 @@ async function handleFieldRoute(
       operationalSlotId: optionalString(body?.operationalSlotId) ?? undefined,
       allowOverflow: body?.allowOverflow === true,
     }, optionalString(body?.appointmentType) ?? undefined);
+    sendJson(res, 200, converted, corsHeaders);
+    return;
+  }
+  if (followUpId && req.method === "POST" && followUpAction === "note") {
+    const body = await readJson(req);
+    const followUp = await service.addFollowUpNote(user, followUpId, requiredString(body?.body, "body"));
+    sendJson(res, 200, { followUp }, corsHeaders);
+    return;
+  }
+  if (followUpId && req.method === "POST" && followUpAction === "convert-to-lead") {
+    const converted = await service.convertFollowUpToLead(user, followUpId);
     sendJson(res, 200, converted, corsHeaders);
     return;
   }
