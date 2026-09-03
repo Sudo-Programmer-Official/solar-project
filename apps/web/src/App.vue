@@ -46,7 +46,7 @@
           <div v-if="user.hasModule('LABS')" class="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
             <GlobalSearchBar />
           </div>
-          <div v-if="user.hasModule('LABS') && showScanProgress" class="border-b border-slate-200 bg-white">
+          <div v-if="user.hasModule('LABS') && showScanProgress && !isLeadScanningRoute" class="border-b border-slate-200 bg-white">
             <div class="mx-auto max-w-6xl px-4 pt-3">
               <ScanProgressPanel
                 :location-label="scanLocationLabel"
@@ -116,6 +116,7 @@ const user = useUserStore();
 const route = useRoute();
 const router = useRouter();
 const isInviteRoute = computed(() => route.path === "/invite");
+const isLeadScanningRoute = computed(() => route.name === "lead-scanning");
 const workspaceLabel = computed(() => {
   const commandRoles: PlatformRole[] = [PlatformRole.SUPER_ADMIN, PlatformRole.ADMIN, PlatformRole.MANAGER];
   return user.roles.some((role) => commandRoles.includes(role)) ? "Command Center" : "Field";

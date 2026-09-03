@@ -395,7 +395,7 @@ async function searchLocation() {
   }
 
   if (searchStore.context?.label && normalizedValue === searchStore.context.label.trim().toLowerCase()) {
-    await findBestDoors({ quiet: true });
+    await findBestDoors();
     return;
   }
 
@@ -410,7 +410,7 @@ async function searchLocation() {
       await router.push(`/properties/${encodeURIComponent(resolved.propertyId)}`);
       return;
     }
-    await findBestDoors({ quiet: true });
+    await findBestDoors();
   } catch {
     notifyError("Unable to reach BlackOps Field. Please try again.");
   }
@@ -421,7 +421,7 @@ async function useCurrentLocation() {
     await searchStore.initializeDefaultContext(true);
     if (searchStore.context?.label) {
       query.value = searchStore.context.label;
-      await findBestDoors({ quiet: true });
+      await findBestDoors();
       return;
     }
     notifyWarning("Unable to use current location.");
@@ -430,12 +430,16 @@ async function useCurrentLocation() {
   }
 }
 
-async function findBestDoors(options: { quiet?: boolean } = {}) {
+async function findBestDoors() {
   if (!searchStore.context) {
     return;
   }
   const center = searchStore.context;
   try {
+    await router.push({
+      path: "/labs/lead-finder/scanning",
+      query: { return: "/labs/lead-finder" },
+    });
     await huntStore.runScan(
       { latitude: center.latitude, longitude: center.longitude },
       {
@@ -443,9 +447,6 @@ async function findBestDoors(options: { quiet?: boolean } = {}) {
         filters: searchStore.filters,
       },
     );
-    if (!options.quiet) {
-      await router.push("/labs/lead-finder");
-    }
   } catch {
     notifyError("Scan failed. Try again.");
   }
@@ -467,7 +468,7 @@ async function handleMobileCommand(command: string) {
     return;
   }
   if (command === "rescan") {
-    await findBestDoors({ quiet: true });
+    await findBestDoors();
     return;
   }
   if (command === "list-view") {
@@ -509,7 +510,7 @@ function resetDraft() {
 function applyDraftFilters() {
   searchStore.setSearchPreferences(draftRadiusMiles.value, cloneFilters(draftFilters.value));
   filtersOpen.value = false;
-  void findBestDoors({ quiet: true });
+  void findBestDoors();
 }
 
 function toggleDraftBooleanFilter(key: FilterToggleKey) {
@@ -555,7 +556,7 @@ async function bootstrapSearchContext() {
   }
   bootstrappedScan.value = true;
   query.value = searchStore.context.label;
-  await findBestDoors({ quiet: true });
+  await findBestDoors();
 }
 </script>
 

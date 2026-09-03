@@ -34,6 +34,7 @@ const router = createRouter({
     { path: "/overview", name: "overview", component: () => import("../pages/Overview.vue"), meta: { module: "OVERVIEW" } },
     { path: "/system", name: "system", component: () => import("../pages/System.vue"), meta: { module: "SYSTEM" } },
     { path: "/labs", name: "labs", component: () => import("../pages/Labs.vue"), meta: { module: "LABS" } },
+    { path: "/labs/lead-finder/scanning", name: "lead-scanning", component: () => import("../pages/LeadScanning.vue"), meta: { module: "LEAD_FINDER" } },
     { path: "/labs/lead-finder", name: "lead-finder", component: () => import("../pages/Hunt.vue"), meta: { module: "LEAD_FINDER" } },
     { path: "/labs/hood-navigator", name: "hood-navigator", component: () => import("../pages/Map.vue"), meta: { module: "HOOD_NAVIGATOR" } },
     { path: "/labs/installation-signals", name: "installation-signals", component: () => import("../pages/Market.vue"), meta: { module: "INSTALLATION_SIGNALS" } },

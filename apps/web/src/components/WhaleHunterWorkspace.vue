@@ -711,6 +711,10 @@ async function runScan() {
   activeClusterKey.value = null;
   selectedPinId.value = null;
   currentView.value = "list";
+  await router.push({
+    path: "/labs/lead-finder/scanning",
+    query: { return: "/labs/lead-finder" },
+  });
   await hunt.runScan({
     latitude: center.latitude,
     longitude: center.longitude,
