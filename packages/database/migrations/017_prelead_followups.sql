@@ -18,6 +18,7 @@ ALTER TABLE field_ops.follow_ups
 
 ALTER TABLE field_ops.follow_ups
   DROP CONSTRAINT IF EXISTS follow_ups_status_check,
+  DROP CONSTRAINT IF EXISTS follow_ups_schedule_check,
   ADD CONSTRAINT follow_ups_status_check CHECK (status IN (
     'OPEN', 'DONE', 'SNOOZED', 'CANCELLED', 'CONVERTED_TO_APPOINTMENT', 'CONVERTED'
   )),
