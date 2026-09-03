@@ -134,7 +134,7 @@ if (route.path === "/invite") {
 
 watch([() => user.isHydrating, () => user.isAuthenticated], ([hydrating, authenticated]) => {
   if (hydrating || !authenticated || isInviteRoute.value) return;
-  if (route.path === "/" || route.name === "legacy-today" || (route.meta.module && !user.hasModule(route.meta.module))) {
+  if (route.path === "/" || (route.meta.module && !user.hasModule(route.meta.module))) {
     void router.replace(user.primaryLandingPath);
   }
 });

@@ -80,6 +80,13 @@
           <div class="mt-3 flex flex-wrap gap-2">
             <span v-for="roleValue in member.roles" :key="roleValue" class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{{ roleValue }}</span>
           </div>
+          <div v-if="member.roles.includes(PlatformRole.CLOSER)" class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3">
+            <div>
+              <p class="text-[10px] font-bold tracking-[0.16em] text-slate-400">CLOSER AVAILABILITY</p>
+              <p class="mt-1 text-sm font-semibold" :class="member.availabilityStatus === 'UNAVAILABLE' ? 'text-amber-700' : 'text-emerald-700'">● {{ member.availabilityStatus === 'UNAVAILABLE' ? 'Unavailable' : 'Available' }}</p>
+            </div>
+            <button v-if="user.can('team:update-user') && canManageMember(member)" class="touch-target rounded-2xl border px-3 py-2 text-xs font-semibold" :class="member.availabilityStatus === 'UNAVAILABLE' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'" type="button" @click="toggleAvailability(member)">{{ member.availabilityStatus === 'UNAVAILABLE' ? 'Mark available' : 'Mark unavailable' }}</button>
+          </div>
           <div v-if="editingId === member.id" class="mt-4 rounded-2xl bg-slate-50 p-3">
             <div class="flex flex-wrap gap-2">
               <button v-for="roleOption in assignableRoles" :key="roleOption" class="rounded-full border px-3 py-2 text-xs font-semibold" :class="editRoles.includes(roleOption) ? 'border-primary-300 bg-white text-primary-700' : 'border-slate-200 bg-white text-slate-600'" type="button" @click="toggleEditRole(roleOption)">{{ roleOption }}</button>
@@ -216,6 +223,17 @@ async function toggleActive(member: TeamMember) {
     successMessage.value = `${updated.displayName} is now ${updated.active ? "active" : "inactive"}.`;
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "Unable to update the user.";
+  }
+}
+
+async function toggleAvailability(member: TeamMember) {
+  try {
+    const nextStatus = member.availabilityStatus === "UNAVAILABLE" ? "AVAILABLE" : "UNAVAILABLE";
+    const updated = await updateTeamMember(member.id, { availabilityStatus: nextStatus });
+    replaceMember(updated);
+    successMessage.value = `${updated.displayName} is now ${nextStatus === "AVAILABLE" ? "available" : "unavailable"} for new assignments.`;
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "Unable to update closer availability.";
   }
 }
 

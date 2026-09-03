@@ -17,7 +17,7 @@ const router = createRouter({
     { path: "/", name: "root", component: () => import("../pages/Home.vue") },
     { path: "/invite", name: "invite", component: () => import("../pages/InviteAccept.vue") },
     { path: "/home", name: "home", component: () => import("../pages/Home.vue"), meta: { module: "HOME" } },
-    { path: "/today", name: "legacy-today", component: () => import("../pages/Home.vue") },
+    { path: "/today", name: "today", component: () => import("../pages/Today.vue"), meta: { module: "TODAY" } },
     { path: "/appointments", name: "appointments", component: () => import("../pages/Appointments.vue"), meta: { module: "APPOINTMENTS" } },
     { path: "/follow-ups", name: "follow-ups", component: () => import("../pages/FollowUps.vue"), meta: { module: "FOLLOW_UPS" } },
     { path: "/operations", name: "operations", component: () => import("../pages/Operations.vue"), meta: { module: "OPERATIONS" } },
@@ -57,7 +57,7 @@ router.beforeEach((to) => {
   if (user.isHydrating || (user.authRequired && !user.isAuthenticated)) {
     return true;
   }
-  if (to.path === "/" || to.name === "legacy-today") {
+  if (to.path === "/") {
     return { path: user.primaryLandingPath };
   }
   if (to.meta.module && !user.hasModule(to.meta.module)) {

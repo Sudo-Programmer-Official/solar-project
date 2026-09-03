@@ -183,7 +183,7 @@ test("assignment conflict preserves the row and explains that the closer changed
     (error: unknown) => error instanceof PlatformHttpError
       && error.status === 409
       && error.code === "ASSIGNMENT_CONFLICT"
-      && error.message.includes("no longer available")
-      && error.message.includes("Choose another eligible closer"),
+      && error.message.includes("unavailable")
+      && error.message.includes("Choose another AVAILABLE closer"),
   );
 });

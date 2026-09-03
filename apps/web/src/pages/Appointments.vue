@@ -21,12 +21,12 @@
           <div class="min-w-0">
             <p class="field-label text-primary-600">MANAGER WORKSPACE</p>
             <h2 class="mt-1 text-xl font-semibold tracking-tight text-slate-900">Appointment assignment</h2>
-            <p class="mt-1 text-sm text-slate-500">Unassigned appointments stay at the top. Eligible closers are checked against the appointment time.</p>
+            <p class="mt-1 text-sm text-slate-500">Unassigned appointments stay at the top. Available closers are checked against status and time conflicts.</p>
           </div>
           <button class="shrink-0 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600" type="button" @click="load">Refresh</button>
         </div>
 
-        <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
           <button class="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left" type="button" @click="statusFilter = 'UNASSIGNED'; dateFilter = 'TODAY'">
             <span class="block text-xs font-semibold text-amber-700">Need assignment</span>
             <strong class="mt-1 block text-2xl tracking-tight text-amber-950">{{ unassignedTodayCount }}</strong>
@@ -34,6 +34,7 @@
           <div class="rounded-2xl bg-slate-50 p-3"><span class="block text-xs text-slate-500">Today</span><strong class="mt-1 block text-2xl tracking-tight text-slate-900">{{ todayCount }}</strong></div>
           <div class="rounded-2xl bg-slate-50 p-3"><span class="block text-xs text-slate-500">Assigned</span><strong class="mt-1 block text-2xl tracking-tight text-slate-900">{{ assignedCount }}</strong></div>
           <div class="rounded-2xl bg-slate-50 p-3"><span class="block text-xs text-slate-500">Completed</span><strong class="mt-1 block text-2xl tracking-tight text-slate-900">{{ completedCount }}</strong></div>
+          <button class="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left" type="button" @click="statusFilter = 'NEEDS_REVIEW'; dateFilter = 'ALL'"><span class="block text-xs font-semibold text-amber-700">Closer review</span><strong class="mt-1 block text-2xl tracking-tight text-amber-950">{{ needsReviewCount }}</strong></button>
         </div>
 
         <div class="mt-4 grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -41,7 +42,7 @@
             <select v-model="dateFilter" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800"><option value="TODAY">Today</option><option value="UPCOMING">Upcoming</option><option value="ALL">All dates</option></select>
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-semibold text-slate-500">Status
-            <select v-model="statusFilter" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800"><option value="PRIORITY">Priority · unassigned first</option><option value="UNASSIGNED">Unassigned</option><option value="ASSIGNED">Assigned</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option><option value="ALL">All statuses</option></select>
+            <select v-model="statusFilter" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800"><option value="PRIORITY">Priority · review first</option><option value="NEEDS_REVIEW">Closer needs review</option><option value="UNASSIGNED">Unassigned</option><option value="ASSIGNED">Assigned</option><option value="COMPLETED">Completed</option><option value="CANCELLED">Cancelled</option><option value="ALL">All statuses</option></select>
           </label>
           <label class="grid min-w-0 gap-1 text-xs font-semibold text-slate-500">Closer
             <select v-model="closerFilter" class="min-h-touch min-w-0 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-normal text-slate-800"><option value="ALL">All closers</option><option v-for="closer in closerOptions" :key="closer.id" :value="closer.id">{{ closer.displayName }}</option></select>
@@ -81,7 +82,7 @@
                 <td class="border-b border-slate-100 px-3 py-4">{{ city(appointment) }}</td>
                 <td class="border-b border-slate-100 px-3 py-4">{{ setterName(appointment) }}</td>
                 <td class="border-b border-slate-100 px-3 py-4"><span class="rounded-full px-2.5 py-1 text-[11px] font-bold" :class="appointment.hasBill ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ appointment.hasBill ? '✓ Bill' : 'Missing' }}</span></td>
-                <td class="border-b border-slate-100 px-3 py-4"><span class="rounded-full px-2.5 py-1 text-[11px] font-bold" :class="statusClasses(appointment)">{{ statusLabel(appointment.status) }}</span></td>
+                <td class="border-b border-slate-100 px-3 py-4"><span class="rounded-full px-2.5 py-1 text-[11px] font-bold" :class="statusClasses(appointment)">{{ statusLabel(appointment.status) }}</span><span v-if="appointment.needsCloserReview" class="mt-2 block w-fit rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800">Closer unavailable · review</span></td>
                 <td class="border-b border-slate-100 px-3 py-4">
                   <div v-if="isAssignmentRow(appointment)" class="min-w-[220px]">
                     <div class="flex items-center gap-2">
@@ -91,8 +92,8 @@
                       </select>
                       <button class="min-h-touch rounded-2xl bg-slate-900 px-3 text-xs font-semibold text-white disabled:opacity-50" :disabled="!assignmentDraft[appointment.id] || assigning[appointment.id]" type="button" @click="assign(appointment)">{{ assigning[appointment.id] ? 'Assigning…' : appointment.closerId ? 'Save' : 'Assign' }}</button>
                     </div>
-                    <span v-if="!availableClosers[appointment.id]" class="mt-1 block text-[11px] text-slate-400">Checking time coverage…</span>
-                    <span v-else-if="availableClosers[appointment.id].length === 0" class="mt-1 block text-[11px] leading-4 text-amber-700">No eligible closer covers this time. Publish availability in Operations.</span>
+                    <span v-if="!availableClosers[appointment.id]" class="mt-1 block text-[11px] text-slate-400">Checking available closers…</span>
+                    <span v-else-if="availableClosers[appointment.id].length === 0" class="mt-1 block text-[11px] leading-4 text-amber-700">No AVAILABLE closer is free for this time. Update status in Team or choose another closer.</span>
                     <span v-if="assignmentError[appointment.id]" class="mt-1 block text-[11px] leading-4 text-red-600">{{ assignmentError[appointment.id] }}</span>
                     <span v-if="assignmentMessage[appointment.id]" class="mt-1 block text-[11px] font-semibold text-emerald-700">{{ assignmentMessage[appointment.id] }}</span>
                   </div>
@@ -111,13 +112,13 @@
               <button class="min-w-0 text-left" type="button" @click="openAppointment(appointment.id)"><strong class="block text-lg tracking-tight text-slate-900">{{ formatTime(appointment.scheduledStart) }}</strong><span class="mt-1 block truncate text-sm font-semibold text-slate-800">{{ customerName(appointment) }}</span><span class="mt-1 block truncate text-xs text-slate-500">{{ city(appointment) }} · Setter: {{ setterName(appointment) }}</span></button>
               <span class="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold" :class="statusClasses(appointment)">{{ statusLabel(appointment.status) }}</span>
             </div>
-            <div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><span class="rounded-full px-2.5 py-1 font-bold" :class="appointment.hasBill ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ appointment.hasBill ? '✓ Bill' : 'Bill missing' }}</span><span v-if="appointment.isOverflow" class="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-800">Overflow</span><span v-if="appointment.outcome" class="text-slate-500">Result: {{ statusLabel(appointment.outcome) }}</span></div>
+            <div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><span class="rounded-full px-2.5 py-1 font-bold" :class="appointment.hasBill ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ appointment.hasBill ? '✓ Bill' : 'Bill missing' }}</span><span v-if="appointment.isOverflow" class="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-800">Overflow</span><span v-if="appointment.needsCloserReview" class="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-800">Closer unavailable · review</span><span v-if="appointment.outcome" class="text-slate-500">Result: {{ statusLabel(appointment.outcome) }}</span></div>
             <div v-if="isAssignmentRow(appointment)" class="mt-3 rounded-2xl bg-slate-50 p-3">
               <p class="text-xs font-semibold text-slate-500">{{ appointment.closerId ? 'Closer' : 'Closer assignment' }}</p>
               <div class="mt-2 grid gap-2 sm:flex">
                 <select v-model="assignmentDraft[appointment.id]" class="min-h-touch min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 text-sm" :disabled="assigning[appointment.id]" @focus="ensureAvailableClosers(appointment)"><option value="">{{ appointment.closerId ? closerName(appointment) : 'Select closer' }}</option><option v-for="closer in availableClosers[appointment.id] ?? []" :key="closer.id" :value="closer.id">{{ closer.displayName }} · {{ closer.appointmentsToday }} today</option></select><button class="touch-target rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" :disabled="!assignmentDraft[appointment.id] || assigning[appointment.id]" type="button" @click="assign(appointment)">{{ assigning[appointment.id] ? 'Assigning…' : appointment.closerId ? 'Reassign' : 'Assign' }}</button>
               </div>
-              <p v-if="!availableClosers[appointment.id]" class="mt-2 text-xs text-slate-400">Checking eligible closers…</p><p v-else-if="availableClosers[appointment.id].length === 0" class="mt-2 text-xs leading-5 text-amber-700">No eligible closer covers {{ formatTime(appointment.scheduledStart) }}. Publish a matching availability window in Operations.</p><p v-if="assignmentError[appointment.id]" class="mt-2 text-xs leading-5 text-red-600">{{ assignmentError[appointment.id] }}</p><p v-if="assignmentMessage[appointment.id]" class="mt-2 text-xs font-semibold text-emerald-700">{{ assignmentMessage[appointment.id] }}</p>
+              <p v-if="!availableClosers[appointment.id]" class="mt-2 text-xs text-slate-400">Checking available closers…</p><p v-else-if="availableClosers[appointment.id].length === 0" class="mt-2 text-xs leading-5 text-amber-700">No AVAILABLE closer is free for this time. Update status in Team or choose another closer.</p><p v-if="assignmentError[appointment.id]" class="mt-2 text-xs leading-5 text-red-600">{{ assignmentError[appointment.id] }}</p><p v-if="assignmentMessage[appointment.id]" class="mt-2 text-xs font-semibold text-emerald-700">{{ assignmentMessage[appointment.id] }}</p>
             </div>
             <p v-else class="mt-3 text-sm text-slate-700">Closer: <strong>{{ closerName(appointment) }}</strong></p>
             <button class="mt-3 min-h-touch rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700" type="button" @click="openAppointment(appointment.id)">Open appointment</button>
@@ -165,7 +166,7 @@ import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { addFieldNote, assignFieldAppointment, cancelFieldAppointment, downloadFieldBill, getAvailableFieldClosers, getFieldAppointment, getFieldAppointments, getFieldBillDownloadUrl, getFieldClosers, getFieldLeads, getFieldOperationalSlots, rescheduleFieldAppointment, updateFieldOutcome, type AvailableCloser, type FieldAppointment, type FieldLead, type FieldLeadContext, type FieldOperationalSlot } from "../services/api";
 import { useUserStore } from "../stores/user.store";
 
-type ManagerStatusFilter = "PRIORITY" | "UNASSIGNED" | "ASSIGNED" | "COMPLETED" | "CANCELLED" | "ALL" | "ACTIVE";
+type ManagerStatusFilter = "PRIORITY" | "NEEDS_REVIEW" | "UNASSIGNED" | "ASSIGNED" | "COMPLETED" | "CANCELLED" | "ALL" | "ACTIVE";
 type DateFilter = "TODAY" | "UPCOMING" | "ALL";
 type TimeFilter = "ALL" | "MORNING" | "AFTERNOON" | "EVENING";
 
@@ -212,10 +213,11 @@ const setterOptions = computed(() => {
 const todayCount = computed(() => appointments.value.filter((appointment) => isToday(appointment.scheduledStart)).length);
 const unassignedTodayCount = computed(() => appointments.value.filter((appointment) => isToday(appointment.scheduledStart) && appointment.status === "UNASSIGNED").length);
 const assignedCount = computed(() => appointments.value.filter((appointment) => Boolean(appointment.closerId) && !["COMPLETED", "NO_SHOW", "CANCELLED"].includes(appointment.status)).length);
+const needsReviewCount = computed(() => appointments.value.filter((appointment) => appointment.needsCloserReview).length);
 const completedCount = computed(() => appointments.value.filter((appointment) => ["COMPLETED", "NO_SHOW"].includes(appointment.status)).length);
 const visibleAppointments = computed(() => appointments.value.filter((appointment) => matchesFilters(appointment)).sort((a, b) => {
   if (statusFilter.value === "PRIORITY") {
-    const priority = (item: FieldAppointment) => item.status === "UNASSIGNED" ? 0 : ["COMPLETED", "NO_SHOW", "CANCELLED"].includes(item.status) ? 2 : 1;
+    const priority = (item: FieldAppointment) => item.status === "UNASSIGNED" ? 0 : item.needsCloserReview ? 1 : ["COMPLETED", "NO_SHOW", "CANCELLED"].includes(item.status) ? 3 : 2;
     const difference = priority(a) - priority(b);
     if (difference !== 0) return difference;
   }
@@ -330,10 +332,11 @@ function matchesFilters(appointment: FieldAppointment) {
   if (dateFilter.value === "TODAY" && !isToday(appointment.scheduledStart)) return false;
   if (dateFilter.value === "UPCOMING" && start.getTime() <= Date.now()) return false;
   if (statusFilter.value === "UNASSIGNED" && appointment.status !== "UNASSIGNED") return false;
+  if (statusFilter.value === "NEEDS_REVIEW" && !appointment.needsCloserReview) return false;
   if (statusFilter.value === "ASSIGNED" && (!appointment.closerId || ["COMPLETED", "NO_SHOW", "CANCELLED"].includes(appointment.status))) return false;
   if (statusFilter.value === "COMPLETED" && !["COMPLETED", "NO_SHOW"].includes(appointment.status)) return false;
   if (statusFilter.value === "CANCELLED" && appointment.status !== "CANCELLED") return false;
-  if ((statusFilter.value === "PRIORITY" || statusFilter.value === "ACTIVE") && ["COMPLETED", "NO_SHOW", "CANCELLED"].includes(appointment.status)) return false;
+  if ((statusFilter.value === "PRIORITY" || statusFilter.value === "ACTIVE" || statusFilter.value === "NEEDS_REVIEW") && ["COMPLETED", "NO_SHOW", "CANCELLED"].includes(appointment.status)) return false;
   if (closerFilter.value !== "ALL" && appointment.closerId !== closerFilter.value) return false;
   if (setterFilter.value !== "ALL" && appointment.setterId !== setterFilter.value) return false;
   const hour = start.getHours();

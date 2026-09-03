@@ -41,11 +41,12 @@ test("module registry resolves role capabilities and landing routes", () => {
 
   const managerModules = resolvePlatformModules(["lead:view-team", "appointment:view-team", "appointment:assign", "team:view", "reports:view", "analytics:view"], DEFAULT_PLATFORM_FEATURE_FLAGS);
   assert.equal(managerModules.includes("OPERATIONS"), true);
+  assert.equal(managerModules.includes("TODAY"), true);
   assert.equal(managerModules.includes("LABS"), false);
-  assert.equal(primaryPlatformRoute(managerModules), "/operations");
+  assert.equal(primaryPlatformRoute(managerModules), "/today");
 
   const superAdminModules = resolvePlatformModules(["*"], DEFAULT_PLATFORM_FEATURE_FLAGS);
   assert.equal(superAdminModules.includes("SYSTEM"), true);
   assert.equal(superAdminModules.includes("LEAD_FINDER"), true);
-  assert.equal(primaryPlatformRoute(superAdminModules), "/overview");
+  assert.equal(primaryPlatformRoute(superAdminModules), "/today");
 });

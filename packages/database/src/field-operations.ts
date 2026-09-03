@@ -74,6 +74,8 @@ export interface FieldAppointment {
   postalCode?: string | null;
   setterName?: string | null;
   closerName?: string | null;
+  closerAvailabilityStatus?: "AVAILABLE" | "UNAVAILABLE" | null;
+  needsCloserReview?: boolean;
   hasBill?: boolean;
 }
 
@@ -142,6 +144,7 @@ export interface FieldCloserCandidate {
   displayName: string;
   teamIds: string[];
   appointmentsToday: number;
+  availabilityStatus?: "AVAILABLE" | "UNAVAILABLE";
 }
 
 export interface FieldFollowUp {
@@ -357,6 +360,8 @@ const appointmentColumnsWithContext = `${appointmentColumnsWithAlias},
   l.state AS state, l.postal_code AS postal_code,
   NULLIF(CONCAT_WS(' ', setter_user.first_name, setter_user.last_name), '') AS setter_name,
   NULLIF(CONCAT_WS(' ', closer_user.first_name, closer_user.last_name), '') AS closer_name,
+  closer_user.availability_status AS closer_availability_status,
+  (a.closer_id IS NOT NULL AND a.status NOT IN ('COMPLETED', 'NO_SHOW', 'CANCELLED') AND (closer_user.id IS NULL OR closer_user.active = FALSE OR closer_user.availability_status = 'UNAVAILABLE')) AS needs_closer_review,
   EXISTS (SELECT 1 FROM field_ops.bill_attachments bill WHERE bill.lead_id = a.lead_id AND bill.replaced_by IS NULL) AS has_bill`;
 
 interface LeadRow {
@@ -375,7 +380,7 @@ interface AppointmentRow {
   started_at: string | Date | null; completed_at: string | Date | null; assigned_at: string | Date | null;
   assigned_by: string | null; notes: string | null; cancel_reason?: string | null; cancelled_at?: string | Date | null; cancelled_by?: string | null; created_at: string | Date; updated_at: string | Date;
   homeowner_name?: string | null; address_line1?: string | null; city?: string | null; state?: string | null; postal_code?: string | null;
-  setter_name?: string | null; closer_name?: string | null; has_bill?: boolean | null;
+  setter_name?: string | null; closer_name?: string | null; closer_availability_status?: "AVAILABLE" | "UNAVAILABLE" | null; needs_closer_review?: boolean | null; has_bill?: boolean | null;
 }
 
 interface OperationalSlotRow {
@@ -774,7 +779,8 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
       `SELECT u.id,
               CONCAT(u.first_name, ' ', u.last_name) AS display_name,
               COALESCE(array_agg(DISTINCT ut.team_id::text) FILTER (WHERE ut.team_id IS NOT NULL), ARRAY[]::text[]) AS team_ids,
-              COUNT(DISTINCT todays.id)::text AS appointments_today
+              COUNT(DISTINCT todays.id)::text AS appointments_today,
+              u.availability_status AS availability_status
        FROM field_ops.appointments a
        JOIN field_ops.users u ON u.active = TRUE
        LEFT JOIN field_ops.user_roles closer_role ON closer_role.user_id = u.id AND closer_role.role_id = 'CLOSER'
@@ -786,18 +792,20 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         AND todays.status NOT IN ('CANCELLED', 'NO_SHOW')
        WHERE a.id = $1
          AND closer_role.user_id IS NOT NULL
+         AND u.availability_status = 'AVAILABLE'
          AND (a.team_id IS NULL OR EXISTS (SELECT 1 FROM field_ops.user_teams appointment_team WHERE appointment_team.user_id = u.id AND appointment_team.team_id = a.team_id))
          AND ${teamFilter}
-         AND EXISTS (
-           SELECT 1 FROM field_ops.closer_availability ca
-           WHERE ca.closer_id = u.id
-             AND ca.slot_start <= a.scheduled_start
-             AND ca.slot_end >= a.scheduled_end
-             AND ((ca.status = 'AVAILABLE' AND ca.booked_count < ca.capacity) OR ca.id = a.availability_slot_id)
+         AND NOT EXISTS (
+           SELECT 1 FROM field_ops.appointments conflict
+           WHERE conflict.closer_id = u.id
+             AND conflict.id <> a.id
+             AND conflict.status NOT IN ('COMPLETED', 'NO_SHOW', 'CANCELLED')
+             AND conflict.scheduled_start < a.scheduled_end
+             AND conflict.scheduled_end > a.scheduled_start
          )
-       GROUP BY u.id, u.first_name, u.last_name
+       GROUP BY u.id, u.first_name, u.last_name, u.availability_status
        ORDER BY appointments_today, u.last_name, u.first_name`, params);
-    return result.rows.map((row) => ({ id: row.id, displayName: row.display_name.trim(), teamIds: row.team_ids, appointmentsToday: Number(row.appointments_today) }));
+    return result.rows.map((row) => ({ id: row.id, displayName: row.display_name.trim(), teamIds: row.team_ids, appointmentsToday: Number(row.appointments_today), availabilityStatus: row.availability_status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE" }));
   }
 
   async assignAppointment(input: { appointmentId: string; closerId: string; assignedBy: string; teamIds: string[] | null; allowReassign?: boolean; isTestData?: boolean }): Promise<FieldAppointment | null> {
@@ -816,50 +824,36 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
         `SELECT u.id
          FROM field_ops.users u
          WHERE u.id = $2 AND u.active = TRUE
+           AND u.availability_status = 'AVAILABLE'
            AND EXISTS (SELECT 1 FROM field_ops.user_roles ur WHERE ur.user_id = u.id AND ur.role_id = 'CLOSER')
            AND ( $1::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM field_ops.appointments a WHERE a.id = $1 AND (a.team_id IS NULL OR EXISTS (SELECT 1 FROM field_ops.user_teams appointment_team WHERE appointment_team.user_id = u.id AND appointment_team.team_id = a.team_id))) )
-           AND ${teamFilter}`,
+           AND ${teamFilter}
+         FOR UPDATE`,
         input.teamIds === null || input.teamIds.length === 0 ? [input.appointmentId, input.closerId] : [input.appointmentId, input.closerId, input.teamIds]);
       if (!closerResult.rows[0]) return null;
 
-      const slotResult = await client.query<{ id: string; closer_id: string }>(
-        `SELECT ca.id, ca.closer_id
-         FROM field_ops.closer_availability ca
-         WHERE ca.closer_id = $1
-           AND ca.slot_start <= $2 AND ca.slot_end >= $3
-           AND ((ca.status = 'AVAILABLE' AND ca.booked_count < ca.capacity) OR ca.id = $4::uuid)
-         ORDER BY (ca.id = $4::uuid) DESC, ca.slot_start
-         LIMIT 1
-         FOR UPDATE`,
-        [input.closerId, current.scheduled_start, current.scheduled_end, current.availability_slot_id]);
-      const targetSlot = slotResult.rows[0];
-      if (!targetSlot) return null;
+      const conflictResult = await client.query<{ id: string }>(
+        `SELECT conflict.id
+         FROM field_ops.appointments conflict
+         WHERE conflict.closer_id = $2
+           AND conflict.id <> $1
+           AND conflict.status NOT IN ('COMPLETED', 'NO_SHOW', 'CANCELLED')
+           AND conflict.scheduled_start < $4
+           AND conflict.scheduled_end > $3
+         LIMIT 1`,
+        [input.appointmentId, input.closerId, current.scheduled_start, current.scheduled_end]);
+      if (conflictResult.rows[0]) return null;
 
-      if (targetSlot.id !== current.availability_slot_id) {
-        const reserved = await client.query<{ id: string }>(
-          `UPDATE field_ops.closer_availability
-           SET booked_count = booked_count + 1,
-               status = CASE WHEN booked_count + 1 >= capacity THEN 'BOOKED' ELSE 'AVAILABLE' END,
-               updated_at = NOW()
-           WHERE id = $1 AND status = 'AVAILABLE' AND booked_count < capacity
-           RETURNING id`, [targetSlot.id]);
-        if (!reserved.rows[0]) return null;
-        if (current.availability_slot_id) {
-          await client.query(
-            `UPDATE field_ops.closer_availability
-             SET booked_count = GREATEST(booked_count - 1, 0),
-                 status = CASE WHEN GREATEST(booked_count - 1, 0) < capacity THEN 'AVAILABLE' ELSE status END,
-                 updated_at = NOW()
-             WHERE id = $1`, [current.availability_slot_id]);
-        }
+      if (current.availability_slot_id) {
+        await releaseCloserAvailability(client, current.availability_slot_id);
       }
 
       const result = await client.query<AppointmentRow>(
         `UPDATE field_ops.appointments
-         SET closer_id = $2, availability_slot_id = $3, status = 'ASSIGNED', assigned_at = NOW(), assigned_by = $4, updated_at = NOW()
+         SET closer_id = $2, availability_slot_id = NULL, status = 'ASSIGNED', assigned_at = NOW(), assigned_by = $3, updated_at = NOW()
          WHERE id = $1
          RETURNING ${appointmentColumns}`,
-        [input.appointmentId, input.closerId, targetSlot.id, input.assignedBy]);
+        [input.appointmentId, input.closerId, input.assignedBy]);
       const appointment = result.rows[0];
       if (!appointment) return null;
       await client.query("UPDATE field_ops.leads SET current_closer_id = $2, updated_at = NOW() WHERE id = $1", [appointment.lead_id, input.closerId]);
@@ -1014,50 +1008,28 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
       if (!slot) return null;
 
       let nextCloserId = current.closer_id;
-      let nextAvailabilitySlotId = current.closer_id ? current.availability_slot_id : null;
-      let releasedCurrentAvailability = false;
+      const nextAvailabilitySlotId = null;
       if (current.closer_id) {
-        const closerSlotResult = await client.query<{ id: string }>(
-          `SELECT ca.id
-           FROM field_ops.closer_availability ca
-           WHERE ca.closer_id = $1 AND ca.slot_start <= $2 AND ca.slot_end >= $3
-             AND ((ca.status = 'AVAILABLE' AND ca.booked_count < ca.capacity) OR ca.id = $4::uuid)
-           ORDER BY (ca.id = $4::uuid) DESC, ca.slot_start
-           LIMIT 1 FOR UPDATE`,
-          [current.closer_id, slot.slot_start, slot.slot_end, current.availability_slot_id]);
-        const closerSlot = closerSlotResult.rows[0];
-        if (closerSlot && closerSlot.id !== current.availability_slot_id) {
-          const reservedCloser = await client.query<{ id: string }>(
-            `UPDATE field_ops.closer_availability
-             SET booked_count = booked_count + 1,
-                 status = CASE WHEN booked_count + 1 >= capacity THEN 'BOOKED' ELSE 'AVAILABLE' END,
-                 updated_at = NOW()
-             WHERE id = $1 AND status = 'AVAILABLE' AND booked_count < capacity
-             RETURNING id`, [closerSlot.id]);
-          if (reservedCloser.rows[0]) {
-            if (current.availability_slot_id) await releaseCloserAvailability(client, current.availability_slot_id);
-            releasedCurrentAvailability = Boolean(current.availability_slot_id);
-            nextAvailabilitySlotId = closerSlot.id;
-          } else {
-            if (current.availability_slot_id) await releaseCloserAvailability(client, current.availability_slot_id);
-            releasedCurrentAvailability = Boolean(current.availability_slot_id);
-            nextCloserId = null;
-            nextAvailabilitySlotId = null;
-          }
-        } else if (!closerSlot) {
-          if (current.availability_slot_id) await releaseCloserAvailability(client, current.availability_slot_id);
-          releasedCurrentAvailability = Boolean(current.availability_slot_id);
-          nextCloserId = null;
-          nextAvailabilitySlotId = null;
+        await client.query(`SELECT id FROM field_ops.users WHERE id = $1 FOR UPDATE`, [current.closer_id]);
+        const conflictResult = await client.query<{ id: string }>(
+          `SELECT conflict.id
+           FROM field_ops.appointments conflict
+           WHERE conflict.closer_id = $1
+             AND conflict.id <> $2
+             AND conflict.status NOT IN ('COMPLETED', 'NO_SHOW', 'CANCELLED')
+             AND conflict.scheduled_start < $4
+             AND conflict.scheduled_end > $3
+           LIMIT 1`,
+          [current.closer_id, current.id, slot.slot_start, slot.slot_end]);
+        if (conflictResult.rows[0]) {
+          if (current.operational_slot_id !== input.operationalSlotId) await releaseOperationalSlot(client, slot.id);
+          return null;
         }
       }
 
-      // Legacy appointments reserved closer availability even when they were
-      // still unassigned. Moving them onto the shared operational schedule
-      // must release that old reservation as part of the same transaction.
-      if (current.availability_slot_id && !releasedCurrentAvailability && current.availability_slot_id !== nextAvailabilitySlotId) {
-        await releaseCloserAvailability(client, current.availability_slot_id);
-      }
+      // Legacy appointments may still carry a closer availability reservation.
+      // Release it as the appointment moves to the user-status model.
+      if (current.availability_slot_id) await releaseCloserAvailability(client, current.availability_slot_id);
 
       if (current.operational_slot_id && current.operational_slot_id !== input.operationalSlotId) {
         await releaseOperationalSlot(client, current.operational_slot_id);
@@ -1392,7 +1364,7 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
 }
 
 interface AvailabilityRow { id: string; closer_id: string; closer_name: string; slot_start: string | Date; slot_end: string | Date; timezone: string; capacity: number | string; booked_count: number | string; status: "AVAILABLE" | "BLOCKED" | "BOOKED"; note: string | null; }
-interface CloserCandidateRow { id: string; display_name: string; team_ids: string[]; appointments_today: number | string; }
+interface CloserCandidateRow { id: string; display_name: string; team_ids: string[]; appointments_today: number | string; availability_status?: "AVAILABLE" | "UNAVAILABLE"; }
 interface AssignmentRow { id: string; lead_id: string; setter_id: string | null; closer_id: string | null; team_id: string | null; availability_slot_id: string | null; scheduled_start: string | Date; scheduled_end: string | Date; status: FieldAppointmentStatus; }
 interface NoteRow { id: string; lead_id: string; appointment_id: string | null; author_id: string | null; author_name?: string | null; author_role?: string | null; kind: "TEXT" | "VOICE"; body: string | null; created_at: string | Date; updated_at: string | Date; }
 interface BillRow { id: string; lead_id: string; uploaded_by: string | null; storage_key: string; file_name: string; mime_type: string; file_size_bytes: number | string; replaced_by: string | null; replaced_at: string | Date | null; created_at: string | Date; }
@@ -1484,7 +1456,7 @@ function toLead(row: LeadRow): FieldLead {
   return { id: row.id, sourceFollowUpId: row.source_follow_up_id ?? null, propertyId: row.property_id, setterId: row.setter_id, currentCloserId: row.current_closer_id, createdByUserId: row.created_by_user_id, teamId: row.team_id, homeownerName: row.homeowner_name, phone: row.phone, email: row.email, addressLine1: row.address_line1, city: row.city, state: row.state, postalCode: row.postal_code, latitude: numberOrNull(row.latitude), longitude: numberOrNull(row.longitude), utility: row.utility, supplier: row.supplier, approximateMonthlyBill: numberOrNull(row.approximate_monthly_bill), qualification: parseJson(row.qualification_json), status: row.status, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
 }
 function toAppointment(row: AppointmentRow): FieldAppointment {
-  return { id: row.id, leadId: row.lead_id, setterId: row.setter_id, closerId: row.closer_id, teamId: row.team_id, availabilitySlotId: row.availability_slot_id ?? null, operationalSlotId: row.operational_slot_id ?? null, isOverflow: Boolean(row.is_overflow), scheduledStart: iso(row.scheduled_start), scheduledEnd: iso(row.scheduled_end), timezone: row.timezone, appointmentType: row.appointment_type, status: row.status, outcome: row.outcome, outcomeNotes: row.outcome_notes, startedAt: iso(row.started_at), completedAt: iso(row.completed_at), assignedAt: iso(row.assigned_at), assignedBy: row.assigned_by, notes: row.notes, cancelReason: row.cancel_reason ?? null, cancelledAt: iso(row.cancelled_at ?? null), cancelledBy: row.cancelled_by ?? null, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), homeownerName: row.homeowner_name ?? null, addressLine1: row.address_line1 ?? null, city: row.city ?? null, state: row.state ?? null, postalCode: row.postal_code ?? null, setterName: row.setter_name ?? null, closerName: row.closer_name ?? null, hasBill: row.has_bill == null ? undefined : Boolean(row.has_bill) };
+  return { id: row.id, leadId: row.lead_id, setterId: row.setter_id, closerId: row.closer_id, teamId: row.team_id, availabilitySlotId: row.availability_slot_id ?? null, operationalSlotId: row.operational_slot_id ?? null, isOverflow: Boolean(row.is_overflow), scheduledStart: iso(row.scheduled_start), scheduledEnd: iso(row.scheduled_end), timezone: row.timezone, appointmentType: row.appointment_type, status: row.status, outcome: row.outcome, outcomeNotes: row.outcome_notes, startedAt: iso(row.started_at), completedAt: iso(row.completed_at), assignedAt: iso(row.assigned_at), assignedBy: row.assigned_by, notes: row.notes, cancelReason: row.cancel_reason ?? null, cancelledAt: iso(row.cancelled_at ?? null), cancelledBy: row.cancelled_by ?? null, createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), homeownerName: row.homeowner_name ?? null, addressLine1: row.address_line1 ?? null, city: row.city ?? null, state: row.state ?? null, postalCode: row.postal_code ?? null, setterName: row.setter_name ?? null, closerName: row.closer_name ?? null, closerAvailabilityStatus: row.closer_availability_status ?? null, needsCloserReview: row.needs_closer_review == null ? undefined : Boolean(row.needs_closer_review), hasBill: row.has_bill == null ? undefined : Boolean(row.has_bill) };
 }
 function toAvailability(row: AvailabilityRow): FieldAvailabilitySlot { return { id: row.id, closerId: row.closer_id, closerName: row.closer_name.trim(), slotStart: iso(row.slot_start), slotEnd: iso(row.slot_end), timezone: row.timezone, capacity: Number(row.capacity), bookedCount: Number(row.booked_count), status: row.status, note: row.note }; }
 function toOperationalSlot(row: OperationalSlotRow): FieldOperationalSlot {

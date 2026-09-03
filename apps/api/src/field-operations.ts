@@ -170,7 +170,7 @@ export class FieldOperationsService {
     const assigned = await this.repository.assignAppointment({ appointmentId, closerId, assignedBy: user.id, teamIds: scopedTeams(user), allowReassign: user.permissions.includes("appointment:reassign") });
     if (!assigned) {
       const time = new Date(appointment.scheduledStart).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-      throw new PlatformHttpError(409, `That closer is no longer available for the ${time} appointment. Choose another eligible closer.`, "ASSIGNMENT_CONFLICT");
+      throw new PlatformHttpError(409, `That closer is unavailable or has a conflicting ${time} appointment. Choose another AVAILABLE closer.`, "ASSIGNMENT_CONFLICT");
     }
     return assigned;
   }

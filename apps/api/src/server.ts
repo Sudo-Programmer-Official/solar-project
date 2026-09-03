@@ -40,7 +40,7 @@ import {
   resolveImageryProperty,
 } from "./imagery";
 import type { SolarRepository } from "../../../packages/database/src/repository";
-import type { PlatformRepository, TeamMemberRecord } from "../../../packages/database/src/platform";
+import type { CloserAvailabilityStatus, PlatformRepository, TeamMemberRecord } from "../../../packages/database/src/platform";
 import type { FieldOperationsRepository, FieldAppointmentOutcome, FieldAppointmentStatus, FieldFollowUpStatus } from "../../../packages/database/src/field-operations";
 import type { IntelligenceRepository } from "../../../packages/territory-scoring/src/index";
 import {
@@ -132,6 +132,11 @@ export function createServer(repository?: SolarRepository, options: CreateServer
 
       if (platformAuth && isTeamPath(url.pathname)) {
         await handleTeamRoute(req, res, url, corsHeaders, platformAuth, currentUser);
+        return;
+      }
+
+      if (platformAuth && isAccountPath(url.pathname)) {
+        await handleAccountRoute(req, res, url, corsHeaders, platformAuth, currentUser);
         return;
       }
 
@@ -778,7 +783,7 @@ async function handleTeamRoute(
     const body = await readJson(req);
     const hasRoles = body?.roles !== undefined;
     const hasTeamChanges = body?.teamIds !== undefined;
-    const hasProfileChanges = ["firstName", "lastName", "phone", "active"].some((key) => body?.[key] !== undefined);
+    const hasProfileChanges = ["firstName", "lastName", "phone", "active", "availabilityStatus"].some((key) => body?.[key] !== undefined);
     if (body?.active === false && target.roles.includes(PlatformRole.SUPER_ADMIN)) {
       const activeSuperAdmins = (await repository.listTeamMembers()).filter((member) => member.active && member.roles.includes(PlatformRole.SUPER_ADMIN));
       if (activeSuperAdmins.length <= 1) throw new PlatformHttpError(400, "The last active Super Admin cannot be deactivated.", "LAST_SUPER_ADMIN_FORBIDDEN");
@@ -835,6 +840,7 @@ async function handleTeamRoute(
       lastName: body?.lastName === undefined ? undefined : requiredString(body.lastName, "lastName"),
       phone: body?.phone === undefined ? undefined : (typeof body.phone === "string" ? body.phone.trim() || null : null),
       active: body?.active === undefined ? undefined : Boolean(body.active),
+      availabilityStatus: body?.availabilityStatus === undefined ? undefined : parseCloserAvailabilityStatus(body.availabilityStatus),
     });
     if (!updated) {
       sendJson(res, 404, { error: "Team user not found." }, corsHeaders);
@@ -846,6 +852,43 @@ async function handleTeamRoute(
   }
 
   sendJson(res, 404, { error: "Team endpoint not found." }, corsHeaders);
+}
+
+async function handleAccountRoute(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  corsHeaders: Record<string, string>,
+  service: PlatformAuthService,
+  authUser: AuthenticatedPlatformUser | null,
+): Promise<void> {
+  const user = requireAuthenticated(authUser ? { user: authUser } : null);
+  const path = normalizePlatformPath(url.pathname);
+  if (req.method === "PATCH" && path === "/account/availability") {
+    requirePermission(user, "availability:update-own");
+    if (!user.roles.includes(PlatformRole.CLOSER)) {
+      throw new PlatformHttpError(400, "Only closers have an operational availability status.", "CLOSER_ROLE_REQUIRED");
+    }
+    const body = await readJson(req);
+    const availabilityStatus = parseCloserAvailabilityStatus(body?.availabilityStatus);
+    const repository = serviceRepository(service);
+    const updated = await repository.updateUser(user.id, { availabilityStatus });
+    if (!updated) {
+      sendJson(res, 404, { error: "Your account could not be loaded." }, corsHeaders);
+      return;
+    }
+    await repository.appendAudit({
+      id: randomUUID(),
+      actorId: user.id,
+      action: "USER_AVAILABILITY_UPDATED",
+      entityType: "USER",
+      entityId: user.id,
+      details: { availabilityStatus },
+    });
+    sendJson(res, 200, { user: toTeamResponse(updated) }, corsHeaders);
+    return;
+  }
+  sendJson(res, 404, { error: "Account endpoint not found." }, corsHeaders);
 }
 
 function serviceRepository(service: PlatformAuthService): PlatformRepository {
@@ -1128,6 +1171,7 @@ function toTeamResponse(member: TeamMemberRecord): Record<string, unknown> {
     updatedAt: member.updatedAt,
     lastLoginAt: member.lastLoginAt,
     mustChangePassword: Boolean(member.mustChangePassword),
+    availabilityStatus: member.availabilityStatus === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
   };
 }
 
@@ -1212,6 +1256,11 @@ function isTeamPath(path: string): boolean {
   return normalized === "/team" || normalized.startsWith("/team/") || normalized === "/users" || normalized.startsWith("/users/");
 }
 
+function isAccountPath(path: string): boolean {
+  const normalized = normalizePlatformPath(path);
+  return normalized === "/account" || normalized.startsWith("/account/");
+}
+
 function isAuthPath(path: string): boolean {
   const normalized = normalizePlatformPath(path);
   return normalized === "/auth" || normalized.startsWith("/auth/");
@@ -1228,6 +1277,11 @@ function requiredString(value: unknown, field: string): string {
 
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function parseCloserAvailabilityStatus(value: unknown): CloserAvailabilityStatus {
+  if (value === "AVAILABLE" || value === "UNAVAILABLE") return value;
+  throw new PlatformHttpError(400, "availabilityStatus must be AVAILABLE or UNAVAILABLE.", "AVAILABILITY_STATUS_INVALID");
 }
 
 function optionalNumber(value: unknown): number | null {

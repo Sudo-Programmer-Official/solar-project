@@ -62,9 +62,8 @@ test("field operations does not use the legacy filename-only bill path", async (
   assert.doesNotMatch(source, /addFieldBill|billDraft|storage reference/);
   assert.match(source, /uploadFieldBill/);
   assert.match(source, /type=\"file\"/);
-  assert.match(source, /async function refreshAvailableClosers/);
-  assert.match(source, /await refreshAvailableClosers\(\);\n    message\.value = "Closer assignment availability published\."/);
-  assert.match(source, /No eligible closer covers this appointment yet/);
+  assert.doesNotMatch(source, /Add closer availability|Publish availability|datetime-local/);
+  assert.match(source, /No AVAILABLE closer is free for this time/);
 });
 
 test("manager appointments use a responsive row-level assignment board", async () => {
@@ -85,6 +84,23 @@ test("manager appointments use a responsive row-level assignment board", async (
   assert.match(source, /Upcoming/);
   assert.match(source, /timeFilter/);
   assert.match(source, /downloadFieldBill/);
+});
+
+test("manager Today is a canonical six-slot command dashboard", async () => {
+  const source = await readFile(new URL("./Today.vue", import.meta.url), "utf8");
+  const routerSource = await readFile(new URL("../router/index.ts", import.meta.url), "utf8");
+
+  assert.match(routerSource, /path: "\/today", name: "today", component: \(\) => import\("\.\.\/pages\/Today\.vue"\)/);
+  assert.match(source, /getFieldAppointments/);
+  assert.match(source, /getFieldOperationalSlots/);
+  assert.match(source, /getFieldFollowUps/);
+  assert.match(source, /getTeamMembers/);
+  assert.match(source, /FIXED_TIMES = \["10:00", "12:00", "14:00", "16:00", "18:00", "20:00"\]/);
+  assert.match(source, /assignFieldAppointment/);
+  assert.match(source, /NEEDS ATTENTION/);
+  assert.match(source, /TEAM TODAY/);
+  assert.match(source, /min-h-touch/);
+  assert.doesNotMatch(source, /WhaleHunterWorkspace/);
 });
 
 test("lead detail exposes audited note edits and canonical activity", async () => {

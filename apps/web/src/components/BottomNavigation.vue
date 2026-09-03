@@ -30,8 +30,8 @@ const items = computed(() => {
     ids = ["APPOINTMENTS", "LEADS", "SCHEDULE", "MORE"];
   } else if (user.roles.includes(PlatformRole.CLOSER)) {
     ids = ["APPOINTMENTS", "LEADS", "SCHEDULE", "MORE"];
-  } else if (user.hasModule("OPERATIONS")) {
-    ids = ["OPERATIONS", "SCHEDULE", "LEADS", "MORE"];
+  } else if (user.hasModule("TODAY")) {
+    ids = ["TODAY", "APPOINTMENTS", "FOLLOW_UPS", "MORE"];
   } else {
     ids = ["HOME", "LEADS", "SCHEDULE", "MORE"];
   }

@@ -1128,6 +1128,7 @@ export type PlatformPermission =
   | "appointment:update-outcome"
   | "appointment:cancel"
   | "appointment:reschedule"
+  | "availability:update-own"
   | "followup:create"
   | "followup:view-own"
   | "followup:view-team"
@@ -1164,6 +1165,7 @@ export interface PlatformFeatureFlags {
 
 export type PlatformModule =
   | "OVERVIEW"
+  | "TODAY"
   | "HOME"
   | "APPOINTMENTS"
   | "FOLLOW_UPS"
@@ -1194,6 +1196,7 @@ export interface PlatformModuleDefinition {
 
 export const PLATFORM_MODULE_REGISTRY: readonly PlatformModuleDefinition[] = [
   { id: "OVERVIEW", label: "Overview", route: "/overview", permission: "system:manage" },
+  { id: "TODAY", label: "Today", route: "/today", anyPermissions: ["appointment:view-team", "appointment:assign", "followup:view-team", "team:view"] },
   { id: "HOME", label: "Home", route: "/home", anyPermissions: ["lead:create", "lead:view-own", "lead:view-team", "lead:view-all"] },
   { id: "APPOINTMENTS", label: "Appointments", route: "/appointments", anyPermissions: ["appointment:view-own", "appointment:view-assigned", "appointment:view-team"] },
   { id: "FOLLOW_UPS", label: "Follow-ups", route: "/follow-ups", anyPermissions: ["followup:create", "followup:view-own", "followup:view-team"] },
@@ -1232,7 +1235,7 @@ export function resolvePlatformModules(
 }
 
 export function primaryPlatformRoute(modules: readonly PlatformModule[]): string {
-  const priority: readonly PlatformModule[] = ["OVERVIEW", "OPERATIONS", "HOME", "APPOINTMENTS"];
+  const priority: readonly PlatformModule[] = ["TODAY", "OVERVIEW", "OPERATIONS", "HOME", "APPOINTMENTS"];
   const preferred = priority.find((module) => modules.includes(module));
   if (preferred) return PLATFORM_MODULE_REGISTRY.find((module) => module.id === preferred)?.route ?? "/home";
   return PLATFORM_MODULE_REGISTRY.find((module) => modules.includes(module.id) && module.id !== "MORE")?.route ?? "/more";
@@ -1310,6 +1313,7 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPe
     "lead:view-assigned",
     "appointment:view-assigned",
     "appointment:update-outcome",
+    "availability:update-own",
     "appointment:cancel",
     "appointment:reschedule",
     "followup:create",

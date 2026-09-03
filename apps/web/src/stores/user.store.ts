@@ -47,6 +47,7 @@ export const useUserStore = defineStore("user", () => {
   const primaryLandingPath = computed(() => primaryPlatformRoute(modules.value));
   const roleLabel = computed(() => roles.value.map((nextRole) => nextRole.replaceAll("_", " ")).join(" · "));
   const teamIds = ref<string[]>([]);
+  const availabilityStatus = ref<"AVAILABLE" | "UNAVAILABLE">("AVAILABLE");
   const isHydrating = ref(true);
   const isAuthenticated = ref(false);
   const mustChangePassword = ref(false);
@@ -131,6 +132,7 @@ export const useUserStore = defineStore("user", () => {
       isAuthenticated.value = !authRequired;
       if (authRequired) {
         roles.value = [PlatformRole.SETTER];
+        availabilityStatus.value = "AVAILABLE";
         remotePermissions.value = null;
         remoteModules.value = null;
         teamIds.value = [];
@@ -146,9 +148,14 @@ export const useUserStore = defineStore("user", () => {
     roles.value = user.roles;
     remotePermissions.value = user.permissions;
     teamIds.value = user.teamIds;
+    availabilityStatus.value = user.availabilityStatus === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE";
     featureFlags.value = user.featureFlags;
     remoteModules.value = Array.isArray(user.modules) ? user.modules : null;
     mustChangePassword.value = user.mustChangePassword;
+  }
+
+  function setAvailabilityStatus(nextStatus: "AVAILABLE" | "UNAVAILABLE"): void {
+    availabilityStatus.value = nextStatus;
   }
 
   return {
@@ -166,6 +173,7 @@ export const useUserStore = defineStore("user", () => {
     primaryLandingPath,
     featureFlags,
     teamIds,
+    availabilityStatus,
     authRequired,
     isHydrating,
     isAuthenticated,
@@ -177,6 +185,7 @@ export const useUserStore = defineStore("user", () => {
     setRole,
     setRoles,
     setFeatureFlags,
+    setAvailabilityStatus,
     hydrate,
     login,
     changePassword,

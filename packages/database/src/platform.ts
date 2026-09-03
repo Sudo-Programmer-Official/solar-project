@@ -4,6 +4,8 @@ import type {
 } from "../../contracts/src/index";
 import type { SqlClient } from "./repository";
 
+export type CloserAvailabilityStatus = "AVAILABLE" | "UNAVAILABLE";
+
 export interface PlatformUserRecord {
   id: string;
   firstName: string;
@@ -17,6 +19,7 @@ export interface PlatformUserRecord {
   roles: PlatformRole[];
   permissions: PlatformPermission[];
   teamIds: string[];
+  availabilityStatus?: CloserAvailabilityStatus;
 }
 
 export interface PlatformSessionRecord {
@@ -51,7 +54,7 @@ export interface PlatformRepository {
   listTeamMembers(): Promise<TeamMemberRecord[]>;
   listTeams(): Promise<Array<{ id: string; name: string }>>;
   createUser(input: CreatePlatformUserInput): Promise<TeamMemberRecord>;
-  updateUser(id: string, input: { firstName?: string; lastName?: string; phone?: string | null; active?: boolean }): Promise<TeamMemberRecord | null>;
+  updateUser(id: string, input: { firstName?: string; lastName?: string; phone?: string | null; active?: boolean; availabilityStatus?: CloserAvailabilityStatus }): Promise<TeamMemberRecord | null>;
   replaceUserRoles(userId: string, roles: PlatformRole[], assignedBy?: string | null): Promise<TeamMemberRecord | null>;
   replaceUserTeams(userId: string, teamIds: string[], assignedBy?: string | null): Promise<TeamMemberRecord | null>;
   setPassword(userId: string, passwordHash: string, mustChangePassword?: boolean): Promise<void>;
@@ -86,6 +89,7 @@ const identitySelect = `
     u.password_hash,
     u.must_change_password,
     u.last_login_at,
+    u.availability_status,
     u.created_at,
     u.updated_at,
     COALESCE(array_agg(DISTINCT ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), ARRAY[]::text[]) AS roles,
@@ -107,6 +111,7 @@ interface PlatformUserRow {
   password_hash: string | null;
   must_change_password: boolean;
   last_login_at: string | Date | null;
+  availability_status?: CloserAvailabilityStatus;
   created_at: string | Date;
   updated_at: string | Date;
   roles: string[];
@@ -152,14 +157,15 @@ export class PostgresPlatformRepository implements PlatformRepository {
     };
   }
 
-  async updateUser(id: string, input: { firstName?: string; lastName?: string; phone?: string | null; active?: boolean }): Promise<TeamMemberRecord | null> {
+  async updateUser(id: string, input: { firstName?: string; lastName?: string; phone?: string | null; active?: boolean; availabilityStatus?: CloserAvailabilityStatus }): Promise<TeamMemberRecord | null> {
     const current = await this.findUserById(id);
     if (!current) return null;
     await this.client.query(
       `UPDATE field_ops.users
-       SET first_name = $2, last_name = $3, phone = $4, active = $5, updated_at = NOW()
+       SET first_name = $2, last_name = $3, phone = $4, active = $5,
+           availability_status = $6, updated_at = NOW()
        WHERE id = $1`,
-      [id, input.firstName ?? current.firstName, input.lastName ?? current.lastName, input.phone === undefined ? current.phone : input.phone, input.active ?? current.active],
+      [id, input.firstName ?? current.firstName, input.lastName ?? current.lastName, input.phone === undefined ? current.phone : input.phone, input.active ?? current.active, input.availabilityStatus ?? current.availabilityStatus ?? "AVAILABLE"],
     );
     const updated = await this.findUserById(id);
     return updated ? { ...updated, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } : null;
@@ -272,6 +278,7 @@ const sessionSelect = `
          s.expires_at, s.refresh_expires_at, s.revoked_at,
          u.id AS identity_id, u.first_name, u.last_name, u.email, u.phone,
          u.active, u.password_hash, u.last_login_at, u.created_at, u.updated_at,
+         u.availability_status,
          u.must_change_password,
          COALESCE(array_agg(DISTINCT ur.role_id) FILTER (WHERE ur.role_id IS NOT NULL), ARRAY[]::text[]) AS roles,
          COALESCE(array_agg(DISTINCT rp.permission_id) FILTER (WHERE rp.permission_id IS NOT NULL), ARRAY[]::text[]) AS permissions,
@@ -308,6 +315,7 @@ function toUser(row: PlatformUserRow): PlatformUserRecord {
     roles: row.roles as PlatformRole[],
     permissions: row.permissions as PlatformPermission[],
     teamIds: row.team_ids,
+    availabilityStatus: row.availability_status === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
   };
 }
 

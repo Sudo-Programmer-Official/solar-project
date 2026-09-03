@@ -47,6 +47,7 @@ export interface PlatformAuthUser {
   roles: PlatformRole[];
   permissions: PlatformPermission[];
   teamIds: string[];
+  availabilityStatus?: "AVAILABLE" | "UNAVAILABLE";
   featureFlags: PlatformFeatureFlags;
   modules: PlatformModule[];
 }
@@ -127,6 +128,8 @@ export interface FieldAppointment {
   postalCode?: string | null;
   setterName?: string | null;
   closerName?: string | null;
+  closerAvailabilityStatus?: "AVAILABLE" | "UNAVAILABLE" | null;
+  needsCloserReview?: boolean;
   hasBill?: boolean;
 }
 
@@ -241,6 +244,7 @@ export interface AvailableCloser {
   displayName: string;
   teamIds: string[];
   appointmentsToday: number;
+  availabilityStatus?: "AVAILABLE" | "UNAVAILABLE";
 }
 
 export interface PropertyDetailPayload {
@@ -459,10 +463,18 @@ export async function createTeamMember(input: TeamMemberInput): Promise<{ user: 
   return requestPlatformJson("/api/v1/team/users", { method: "POST", body: JSON.stringify(input) });
 }
 
-export async function updateTeamMember(id: string, input: Partial<TeamMemberInput> & { active?: boolean }): Promise<TeamMember> {
+export async function updateTeamMember(id: string, input: Partial<TeamMemberInput> & { active?: boolean; availabilityStatus?: "AVAILABLE" | "UNAVAILABLE" }): Promise<TeamMember> {
   const response = await requestPlatformJson<{ user: TeamMember }>(`/api/v1/team/users/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(input),
+  });
+  return response.user;
+}
+
+export async function updateOwnAvailability(status: "AVAILABLE" | "UNAVAILABLE"): Promise<PlatformAuthUser> {
+  const response = await requestPlatformJson<{ user: PlatformAuthUser }>("/api/v1/account/availability", {
+    method: "PATCH",
+    body: JSON.stringify({ availabilityStatus: status }),
   });
   return response.user;
 }
@@ -519,8 +531,8 @@ export async function updateFieldOperationalSlotDefinition(id: string, standardC
   return response.definition;
 }
 
-export async function getFieldClosers(): Promise<Array<{ id: string; displayName: string; teamIds: string[] }>> {
-  const response = await requestPlatformJson<{ closers: Array<{ id: string; displayName: string; teamIds: string[] }> }>("/api/v1/field/closers", { method: "GET" });
+export async function getFieldClosers(): Promise<Array<{ id: string; displayName: string; teamIds: string[]; availabilityStatus?: "AVAILABLE" | "UNAVAILABLE" }>> {
+  const response = await requestPlatformJson<{ closers: Array<{ id: string; displayName: string; teamIds: string[]; availabilityStatus?: "AVAILABLE" | "UNAVAILABLE" }> }>("/api/v1/field/closers", { method: "GET" });
   return response.closers;
 }
 

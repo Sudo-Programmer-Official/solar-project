@@ -32,6 +32,7 @@ export interface AuthenticatedPlatformUser {
   roles: PlatformRole[];
   permissions: PlatformPermission[];
   teamIds: string[];
+  availabilityStatus?: "AVAILABLE" | "UNAVAILABLE";
   featureFlags: PlatformFeatureFlags;
   modules: PlatformModule[];
 }
@@ -265,6 +266,7 @@ export function toAuthUser(user: PlatformUserRecord, featureFlags: PlatformFeatu
     roles: user.roles,
     permissions: user.permissions,
     teamIds: user.teamIds,
+    availabilityStatus: user.availabilityStatus === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
     featureFlags,
     modules: resolvePlatformModules(user.permissions, featureFlags),
   };

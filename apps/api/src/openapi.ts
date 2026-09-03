@@ -63,6 +63,7 @@ export const openApiEndpoints = [
   "GET /field/operational-slot-definitions",
   "PATCH /field/operational-slot-definitions/:id",
   "GET /field/closers",
+  "PATCH /account/availability",
   "GET /field/appointments",
   "GET /field/appointments/:id",
   "POST /field/appointments/:id/assign",
