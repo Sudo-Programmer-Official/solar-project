@@ -1,6 +1,6 @@
 <template>
-  <main class="px-4 pb-6">
-    <MobileHeader eyebrow="BLACKOPS FIELD" title="Property Detail" subtitle="Verify the house before you knock.">
+  <main :class="embedded ? 'px-0 pb-6' : 'px-4 pb-6'">
+    <MobileHeader v-if="!embedded" eyebrow="BLACKOPS FIELD" title="Property Detail" subtitle="Verify the house before you knock.">
       <template #action>
         <button class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold tracking-[0.08em] text-slate-700 shadow-sm" @click="reload">
           Reload
@@ -15,20 +15,17 @@
       title="Property not found"
       message="This property could not be loaded."
       action-label="Back to Today"
-      @action="goBack"
+      @action="closeDetail"
     />
 
     <template v-else>
       <section class="page-surface overflow-hidden">
-        <SatelliteImagePanel
+        <PropertyMediaViewer
           class="rounded-none border-0 border-b border-slate-200"
           :property-id="detail.property.id"
           :latitude="detail.property.latitude ?? null"
           :longitude="detail.property.longitude ?? null"
           :address="displayAddress"
-          :subtitle="locationLabel"
-          :show-street-preview="true"
-          @action="verifyOnGoogleMaps"
         />
 
         <div class="p-4">
@@ -79,64 +76,7 @@
         </div>
       </section>
 
-      <section class="mt-4 page-surface p-2">
-        <div class="grid gap-2" :class="capabilities?.imagery.streetView ? 'grid-cols-3' : 'grid-cols-2'">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            class="touch-target rounded-2xl px-4 py-3 text-sm font-semibold transition"
-            :class="activeTab === tab.key ? 'bg-primary-50 text-primary-700 border border-primary-200' : 'bg-slate-50 text-slate-600 border border-slate-200'"
-            @click="activeTab = tab.key"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
-      </section>
-
-      <section v-if="activeTab === 'SATELLITE'" class="mt-4 grid gap-4">
-        <div class="page-surface p-4">
-          <p class="field-label">Satellite verification</p>
-          <p class="mt-2 text-sm text-slate-500">
-            Centered on the property coordinates with the marker placed at the target house.
-          </p>
-          <div class="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-            <div class="rounded-2xl bg-slate-50 p-3">
-              <span class="text-slate-500">Address</span>
-              <strong class="mt-1 block text-slate-900">{{ displayAddress }}</strong>
-            </div>
-            <div class="rounded-2xl bg-slate-50 p-3">
-              <span class="text-slate-500">Coordinates</span>
-              <strong class="mt-1 block text-slate-900">{{ coordinateLabel }}</strong>
-            </div>
-            <div class="rounded-2xl bg-slate-50 p-3">
-              <span class="text-slate-500">Building center</span>
-              <strong class="mt-1 block text-slate-900">{{ buildingCenterLabel }}</strong>
-            </div>
-            <div class="rounded-2xl bg-slate-50 p-3">
-              <span class="text-slate-500">Match</span>
-              <strong class="mt-1 block text-slate-900">{{ locationMatchLabel }}</strong>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section v-else-if="activeTab === 'STREET' && capabilities?.imagery.streetView" class="mt-4">
-        <StreetViewPanel
-          :property-id="detail.property.id"
-          :latitude="detail.property.latitude ?? null"
-          :longitude="detail.property.longitude ?? null"
-          :address="displayAddress"
-        />
-      </section>
-
-      <section v-else-if="activeTab === 'STREET'" class="mt-4 page-surface p-4">
-        <p class="text-sm font-semibold text-slate-900">Street View unavailable</p>
-        <p class="mt-2 text-sm leading-6 text-slate-500">
-          Street View is not enabled for this property yet.
-        </p>
-      </section>
-
-      <section v-else class="mt-4 grid gap-4">
+      <section class="mt-4 grid gap-4">
         <div class="page-surface p-4">
           <p class="field-label">Next best action</p>
           <div class="mt-2">
@@ -162,6 +102,24 @@
             <div class="rounded-2xl bg-slate-50 p-3">
               <span class="text-slate-500">Data quality</span>
               <strong class="mt-1 block text-slate-900">{{ detail.dataQuality.grade }} / {{ detail.dataQuality.confidence }}%</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="page-surface p-4">
+          <p class="field-label">Location verification</p>
+          <div class="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-3">
+            <div class="rounded-2xl bg-slate-50 p-3">
+              <span class="text-slate-500">Coordinates</span>
+              <strong class="mt-1 block text-slate-900">{{ coordinateLabel }}</strong>
+            </div>
+            <div class="rounded-2xl bg-slate-50 p-3">
+              <span class="text-slate-500">Building center</span>
+              <strong class="mt-1 block text-slate-900">{{ buildingCenterLabel }}</strong>
+            </div>
+            <div class="rounded-2xl bg-slate-50 p-3">
+              <span class="text-slate-500">Image match</span>
+              <strong class="mt-1 block text-slate-900">{{ locationMatchLabel }}</strong>
             </div>
           </div>
         </div>
@@ -322,8 +280,7 @@ import type { LeadOutcome, NextBestAction, HomeownerConfirmationState, PropertyV
 import MobileHeader from "../components/MobileHeader.vue";
 import EmptyState from "../components/EmptyState.vue";
 import LoadingCard from "../components/LoadingCard.vue";
-import SatelliteImagePanel from "../components/SatelliteImagePanel.vue";
-import StreetViewPanel from "../components/StreetViewPanel.vue";
+import PropertyMediaViewer from "../components/PropertyMediaViewer.vue";
 import LocationMatchBadge from "../components/LocationMatchBadge.vue";
 import OpportunityScore from "../components/OpportunityScore.vue";
 import WhaleBadge from "../components/WhaleBadge.vue";
@@ -332,7 +289,7 @@ import NextBestActionCard from "../components/NextBestAction.vue";
 import { useLeadStore } from "../stores/lead.store";
 import { useLeadActions } from "../composables/useLeadActions";
 import { buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl } from "../services/imagery";
-import { getCapabilities, savePropertyVisualSignals } from "../services/api";
+import { savePropertyVisualSignals } from "../services/api";
 
 const route = useRoute();
 const router = useRouter();
@@ -340,11 +297,20 @@ const leadStore = useLeadStore();
 const { leadDetail, loading } = storeToRefs(leadStore);
 const { updateOutcome } = useLeadActions();
 
-const activeTab = ref<"SATELLITE" | "STREET" | "DETAILS">("SATELLITE");
+const props = withDefaults(defineProps<{
+  propertyId?: string;
+  embedded?: boolean;
+}>(), {
+  propertyId: undefined,
+  embedded: false,
+});
+const emit = defineEmits<{
+  close: [];
+}>();
+
 const savingOutcome = ref(false);
 const savingSignals = ref(false);
 const signalsSheetOpen = ref(false);
-const capabilities = ref<{ imagery: { satellite: boolean; streetView: boolean } } | null>(null);
 const confirmationChoices = [
   { label: "Yes", value: "YES" },
   { label: "No", value: "NO" },
@@ -354,26 +320,6 @@ const signalDraft = reactive<HomeownerConfirmationState>({
   poolHeated: "UNKNOWN",
   highSummerBill: "UNKNOWN",
   poolEquipmentIncreasesUsage: "UNKNOWN",
-});
-
-type PropertyDetailTabKey = "SATELLITE" | "STREET" | "DETAILS";
-
-interface PropertyDetailTab {
-  key: PropertyDetailTabKey;
-  label: string;
-}
-
-const tabs = computed<PropertyDetailTab[]>(() => {
-  const baseTabs: PropertyDetailTab[] = [
-    { key: "SATELLITE", label: "Satellite" } as PropertyDetailTab,
-    { key: "DETAILS", label: "Details" } as PropertyDetailTab,
-  ];
-
-  if (capabilities.value?.imagery.streetView) {
-    return [baseTabs[0], { key: "STREET", label: "Street View" } as PropertyDetailTab, baseTabs[1]];
-  }
-
-  return baseTabs;
 });
 
 const outcomeButtons = [
@@ -386,6 +332,7 @@ const outcomeButtons = [
 ] as const satisfies ReadonlyArray<{ label: string; outcome: LeadOutcome["outcome"] }>;
 
 const detail = computed(() => leadDetail.value);
+const currentPropertyId = computed(() => props.propertyId ?? (typeof route.params.id === "string" ? route.params.id : null));
 const displayAddress = computed(() => formatLeadAddress(detail.value?.property.street ?? null, detail.value?.property.normalizedAddress ?? null, detail.value?.property.city ?? null, detail.value?.property.state ?? null, detail.value?.property.municipality ?? null));
 const locationLabel = computed(() => formatLocationLabel(detail.value?.property.city ?? null, detail.value?.property.state ?? null, detail.value?.property.municipality ?? null));
 const coordinateLabel = computed(() => {
@@ -420,26 +367,20 @@ const nextBestAction = computed<NextBestAction>(() => {
 
 onMounted(() => {
   void reload();
-  void loadCapabilities();
 });
 
 watch(
-  () => route.params.id,
+  currentPropertyId,
   () => {
     void reload();
-    void loadCapabilities();
   },
 );
 
 async function reload() {
-  await leadStore.loadLead(String(route.params.id));
-}
-
-async function loadCapabilities() {
-  capabilities.value = await getCapabilities();
-  if (!capabilities.value?.imagery.streetView && activeTab.value === "STREET") {
-    activeTab.value = "SATELLITE";
+  if (!currentPropertyId.value) {
+    return;
   }
+  await leadStore.loadLead(currentPropertyId.value);
 }
 
 function openSignalsSheet() {
@@ -474,6 +415,14 @@ async function saveSignals() {
 
 function goBack() {
   router.push("/labs/lead-finder");
+}
+
+function closeDetail() {
+  if (props.embedded) {
+    emit("close");
+    return;
+  }
+  goBack();
 }
 
 function verifyOnGoogleMaps() {

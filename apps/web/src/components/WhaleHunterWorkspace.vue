@@ -156,39 +156,16 @@
       </section>
     </section>
 
-    <section v-else class="mt-4 grid gap-4">
-      <template v-if="hunt.isScanning && results.length === 0">
-        <LeadCardSkeleton v-for="item in skeletonCount" :key="`lead-skeleton-${item}`" />
-      </template>
-      <div v-else-if="showLoadMismatch" class="page-surface p-6 text-center">
-        <p class="text-base font-semibold text-slate-900">Lead cards failed to load.</p>
-        <p class="mt-2 text-sm leading-6 text-slate-500">The scan found strong leads, but the results page did not return any cards.</p>
-        <button class="touch-target mt-5 rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm" @click="runScan">
-          Retry scan
-        </button>
+    <section v-else class="mt-4">
+      <div v-if="showLoadMismatch" class="page-surface p-6 text-center">
+        <p class="text-base font-semibold text-slate-900">Lead results failed to load.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">The scan found strong leads, but the result page did not return any rows.</p>
+        <button class="touch-target mt-5 rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm" type="button" @click="runScan">Retry scan</button>
       </div>
       <div v-else-if="showZeroLeadState" class="page-surface p-6 text-center">
         <p class="text-base font-semibold text-slate-900">{{ emptyStateTitle }}</p>
         <p class="mt-2 text-sm leading-6 text-slate-500">{{ emptyStateMessage }}</p>
-        <div class="mt-5 grid gap-2 sm:grid-cols-2">
-          <button
-            v-if="suggestedLowerCapacity != null"
-            class="touch-target rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm"
-            @click="lowerCapacityAndRescan"
-          >
-            Try {{ suggestedLowerCapacity }}+ kW
-          </button>
-          <button class="touch-target rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="clearFiltersAndRescan">
-            Clear filters
-          </button>
-        </div>
-      </div>
-      <div v-else-if="showClusterEmptyState" class="page-surface p-6 text-center">
-        <p class="text-base font-semibold text-slate-900">No cards in this cluster.</p>
-        <p class="mt-2 text-sm leading-6 text-slate-500">Clear the cluster selection to view all {{ strongLeadCount }} leads.</p>
-        <button class="touch-target mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" @click="clearClusterFilter">
-          Show all leads
-        </button>
+        <button class="touch-target mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm" type="button" @click="clearFiltersAndRescan">Clear filters</button>
       </div>
       <EmptyState
         v-else-if="results.length === 0 && !hunt.isScanning"
@@ -197,59 +174,18 @@
         action-label="Find Best Doors"
         @action="runScan"
       />
-      <template v-if="visibleResults.length > 0">
-        <LeadCard
-          v-for="lead in visibleResults"
-          :key="lead.id"
-          :lead="lead"
-          :selected="selectedIds.has(lead.propertyId ?? lead.id)"
-          @navigate="navigateToLead(lead)"
-          @toggle="toggleLead(lead)"
-          @open="openLead(lead)"
-        />
-      </template>
-      <template v-if="hunt.isScanning && results.length > 0">
-        <LeadCardSkeleton v-for="item in skeletonCount" :key="`lead-skeleton-inline-${item}`" />
-      </template>
-      <div v-if="hunt.isScanning" class="page-surface flex items-center gap-3 p-4">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500">
-          <svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" class="opacity-20" stroke="currentColor" stroke-width="3" />
-            <path d="M21 12a9 9 0 0 0-9-9" class="opacity-90" stroke="currentColor" stroke-linecap="round" stroke-width="3" />
-          </svg>
-        </div>
-        <div class="min-w-0">
-          <p class="text-sm font-semibold text-slate-900">Still analyzing nearby homes</p>
-          <p class="mt-1 text-sm text-slate-500">More results may appear.</p>
-        </div>
-      </div>
-      <div v-if="hunt.isTerminal && results.length > 0" class="page-surface p-4 text-center">
-        <p class="text-sm font-semibold text-slate-900">{{ loadedResultsLabel }}</p>
-        <p v-if="scanResultsHasMore" class="mt-1 text-sm text-slate-500">
-          More leads remain in this scan.
-        </p>
-        <p v-else-if="nextRadiusSuggestion" class="mt-1 text-sm text-slate-500">
-          All leads in this {{ hunt.radiusMiles }} mi scan are loaded. Expand to {{ nextRadiusSuggestion }} mi.
-        </p>
-        <button
-          v-if="scanResultsHasMore"
-          class="mt-4 touch-target w-full rounded-2xl border border-primary-200 bg-primary-50 px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm disabled:opacity-50"
-          :disabled="scanResultsLoading"
-          @click="loadMore"
-        >
-          {{ scanResultsLoading ? "Loading..." : "Load 20 more" }}
-        </button>
-        <button
-          v-else-if="nextRadiusSuggestion"
-          class="mt-4 touch-target w-full rounded-2xl bg-primary-500 px-4 py-3 text-sm font-semibold text-white shadow-sm"
-          @click="expandRadius"
-        >
-          Expand to {{ nextRadiusSuggestion }} mi
-        </button>
-        <p v-else class="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-          All available leads loaded
-        </p>
-      </div>
+      <LeadResultsTable
+        v-else
+        :leads="visibleResults"
+        :total="scanResultsTotal || strongLeadCount"
+        :has-more="scanResultsHasMore"
+        :loading-more="scanResultsLoading"
+        :is-scanning="hunt.isScanning"
+        :selected-ids="hunt.selectedPropertyIds"
+        @toggle="toggleLead"
+        @load-more="loadMore"
+      />
+
     </section>
 
     <div v-if="selectedIds.size > 0" class="sticky bottom-24 mt-4">
@@ -338,10 +274,9 @@ import { useHuntStore } from "../stores/hunt.store";
 import { useSearchContextStore } from "../stores/search-context.store";
 import { resolveLocation } from "../services/api";
 import PropertyVisual, { type PropertyVisualPoint } from "./PropertyVisual.vue";
-import LeadCard from "./LeadCard.vue";
-import LoadingCard from "./LoadingCard.vue";
 import EmptyState from "./EmptyState.vue";
 import MobileHeader from "./MobileHeader.vue";
+import LeadResultsTable from "./LeadResultsTable.vue";
 import LeadCardSkeleton from "./LeadCardSkeleton.vue";
 import SwipeHuntDeck from "./SwipeHuntDeck.vue";
 import { formatSolarAnalysisProgress } from "../utils/scanProgress";
@@ -362,7 +297,7 @@ const { scanResults, loading, routeLoading, scanProgress, scanResultsTotal, scan
 const isSwipeHuntMode = computed(() => router.currentRoute.value.path === "/labs/lead-finder");
 const isMobileViewport = ref(false);
 const mobileViewMode = computed(() => (typeof route.query.view === "string" ? route.query.view : null));
-const showSwipeDeck = computed(() => isSwipeHuntMode.value && isMobileViewport.value && mobileViewMode.value !== "list");
+const showSwipeDeck = computed(() => isSwipeHuntMode.value && isMobileViewport.value && mobileViewMode.value === "swipe");
 const currentView = ref<"list" | "map">(props.initialView);
 const selectedPinId = ref<string | null>(null);
 const activeClusterKey = ref<string | null>(null);
@@ -398,7 +333,6 @@ const discoveredCount = computed(() => hunt.discoveredCount);
 const strongLeadCount = computed(() => hunt.strongLeadCount);
 const solarAnalyzedCount = computed(() => hunt.solarAnalyzedCount);
 const solarAnalysisTarget = computed(() => hunt.solarAnalysisTarget);
-const skeletonCount = computed(() => (results.value.length === 0 ? 3 : 2));
 const searchStoreRadiusLabel = computed(() => `${searchContextStore.radiusMiles} mi radius`);
 const currentLatitude = computed(() => resolvedLocation.value?.latitude ?? hunt.lastLatitude ?? null);
 const currentLongitude = computed(() => resolvedLocation.value?.longitude ?? hunt.lastLongitude ?? null);
@@ -436,13 +370,6 @@ const summaryLabel = computed(() => {
     return `${strongLeadCount.value} strong leads found so far`;
   }
   return `${strongLeadCount.value} strong leads loaded`;
-});
-const loadedResultsLabel = computed(() => {
-  const total = scanResultsTotal.value || strongLeadCount.value || results.value.length;
-  if (total <= 0) {
-    return "No leads loaded yet";
-  }
-  return `${results.value.length} of ${total} leads loaded`;
 });
 const nextRadiusSuggestion = computed<10 | 20 | null>(() => {
   if (hunt.radiusMiles === 5) return 10;

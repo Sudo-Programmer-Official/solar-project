@@ -81,96 +81,20 @@
       </div>
     </section>
 
-    <section v-if="hunt.scan || hunt.isScanning || swipeDeckResults.length > 0" class="mt-4 md:hidden">
-      <SwipeHuntDeck
-        :lead="swipeDeckLead"
-        :preload-leads="swipeDeckResults.slice(1, 3)"
-        :review-label="swipeReviewLabel"
-        :saved-count="swipeSavedCount"
-        :remaining-count="swipeRemainingCount"
-        :has-more="scanResultsHasMore"
-        :loading-more="scanResultsLoading"
-        :is-scanning="hunt.isScanning"
-        :empty-title="emptyStateTitle"
-        :empty-message="emptyStateMessage"
-        :next-radius-suggestion="nextRadiusSuggestion"
-        @save="saveCurrentSwipeLead"
-        @skip="skipCurrentSwipeLead"
-        @navigate="navigateCurrentSwipeLead"
-        @open="openCurrentSwipeLead"
-        @build-route="buildRouteFromSaved"
-        @load-more="loadMore"
-        @expand-radius="expandRadius"
-      />
-    </section>
+    <LeadResultsTable
+      v-if="hunt.scan || hunt.isScanning"
+      class="mt-4"
+      :leads="results"
+      :total="scanResultsTotal || strongLeadCount"
+      :has-more="scanResultsHasMore"
+      :loading-more="scanResultsLoading"
+      :is-scanning="hunt.isScanning"
+      :selected-ids="hunt.selectedPropertyIds"
+      @toggle="toggleLead"
+      @load-more="loadMore"
+    />
 
-    <section v-if="results.length > 0 || hunt.isScanning" class="mt-4">
-      <div class="mb-3 flex items-end justify-between gap-3 px-1">
-        <div>
-          <p class="field-label">Pulled leads</p>
-          <h2 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Live pipeline</h2>
-        </div>
-        <span class="text-sm font-semibold text-slate-500">{{ loadedLabel }}</span>
-      </div>
-
-      <div class="grid gap-3">
-        <article
-          v-for="lead in results"
-          :key="lead.propertyId ?? lead.id"
-          class="page-surface border-slate-200/90 p-4 transition hover:border-cyan-200 hover:shadow-md"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">{{ lead.opportunityScore }} opportunity</span>
-                <span v-if="lead.whaleScore >= 60" class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">Whale candidate</span>
-              </div>
-              <h3 class="mt-3 truncate text-base font-semibold text-slate-950 sm:text-lg">{{ leadTitle(lead) }}</h3>
-              <p class="mt-1 truncate text-sm text-slate-500">{{ leadLocation(lead) }} · {{ distanceLabel(lead.distanceMiles) }}</p>
-            </div>
-            <button
-              class="inline-flex min-h-touch shrink-0 items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-200 hover:text-cyan-700"
-              type="button"
-              @click="openLead(lead)"
-            >
-              Open
-            </button>
-          </div>
-          <div class="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-            <div class="rounded-xl bg-slate-50 p-3">
-              <span class="block text-xs text-slate-500">System potential</span>
-              <strong class="mt-1 block text-slate-950">{{ formatNumber(lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw) }} kW</strong>
-            </div>
-            <div class="rounded-xl bg-slate-50 p-3">
-              <span class="block text-xs text-slate-500">Confidence</span>
-              <strong class="mt-1 block text-slate-950">{{ lead.confidence }}%</strong>
-            </div>
-            <div class="col-span-2 rounded-xl bg-slate-50 p-3 sm:col-span-1">
-              <span class="block text-xs text-slate-500">Next action</span>
-              <strong class="mt-1 block truncate text-slate-950">{{ lead.nextBestAction.label }}</strong>
-            </div>
-          </div>
-        </article>
-
-        <template v-if="hunt.isScanning">
-          <div v-for="item in skeletonCount" :key="`lead-scanning-skeleton-${item}`" class="page-surface animate-pulse p-4" aria-hidden="true">
-            <div class="flex items-start justify-between gap-3">
-              <div class="w-full space-y-3">
-                <div class="h-5 w-32 rounded-full bg-slate-100" />
-                <div class="h-5 w-56 max-w-full rounded-full bg-slate-100" />
-                <div class="h-4 w-40 rounded-full bg-slate-100" />
-              </div>
-              <div class="h-11 w-16 shrink-0 rounded-xl bg-slate-100" />
-            </div>
-            <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <div v-for="metric in 3" :key="metric" class="h-16 rounded-xl bg-slate-50" />
-            </div>
-          </div>
-        </template>
-      </div>
-    </section>
-
-    <section v-else class="mt-4 page-surface p-6 text-center">
+    <section v-if="!hunt.scan && !hunt.isScanning" class="mt-4 page-surface p-6 text-center">
       <p class="text-base font-semibold text-slate-950">No scan is running</p>
       <p class="mt-2 text-sm leading-6 text-slate-500">Start a scan to pull ranked solar opportunities into this pipeline.</p>
       <button
@@ -204,29 +128,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import type { DiscoveryScanLead } from "@solar/contracts";
-import { ElNotification } from "element-plus";
 import MobileHeader from "../components/MobileHeader.vue";
-import { useLeadActions } from "../composables/useLeadActions";
+import LeadResultsTable from "../components/LeadResultsTable.vue";
 import { useHuntStore } from "../stores/hunt.store";
 import { useSearchContextStore } from "../stores/search-context.store";
 import { formatSolarAnalysisProgress } from "../utils/scanProgress";
-import SwipeHuntDeck from "../components/SwipeHuntDeck.vue";
 
 const router = useRouter();
 const hunt = useHuntStore();
 const searchStore = useSearchContextStore();
-const { openDirections } = useLeadActions();
 const startingScan = ref(false);
 
 const results = computed(() => hunt.scanResults);
-const swipeDeckResults = computed(() => hunt.swipeDeckResults);
-const swipeDeckLead = computed(() => hunt.swipeDeckLead);
-const swipeReviewLabel = computed(() => hunt.swipeReviewLabel);
-const swipeSavedCount = computed(() => hunt.swipeSavedCount);
-const swipeRemainingCount = computed(() => hunt.swipeRemainingCount);
 const locationLabel = computed(() => searchStore.contextLabel || hunt.scan?.currentLocation || "selected location");
 const radiusLabel = computed(() => `${searchStore.radiusMiles} mi radius`);
 const filterLabel = computed(() => searchStore.filterCount > 0 ? `${searchStore.filterCount} filters active` : "all filters");
@@ -234,6 +149,7 @@ const discoveredCount = computed(() => hunt.discoveredCount);
 const strongLeadCount = computed(() => hunt.strongLeadCount);
 const solarAnalyzedCount = computed(() => hunt.solarAnalyzedCount);
 const solarAnalysisTarget = computed(() => hunt.solarAnalysisTarget);
+const scanResultsTotal = computed(() => hunt.scanResultsTotal);
 const loadedLabel = computed(() => {
   const total = hunt.scanResultsTotal || strongLeadCount.value || results.value.length;
   return total > 0 ? `${results.value.length} of ${total} loaded` : "Waiting for leads";
@@ -250,6 +166,8 @@ const statusLabel = computed(() => {
 const statusBadgeLabel = computed(() => {
   if (hasError.value) return "Action needed";
   if (hunt.isScanning) return "Live";
+  if (hunt.scanStatus === "PARTIAL") return "Review";
+  if (hunt.scanStatus === "DATA_COVERAGE_UNAVAILABLE") return "Unavailable";
   if (hunt.isComplete) return "Ready";
   return "Idle";
 });
@@ -301,17 +219,8 @@ const progressHint = computed(() => {
   if (solarAnalyzedCount.value > 0 || hasSolarProgress.value) return solarProgressLabel.value;
   return "More results may appear while discovery continues.";
 });
-const skeletonCount = computed(() => results.value.length === 0 ? 2 : 1);
-const nextRadiusSuggestion = computed<10 | 20 | null>(() => {
-  if (hunt.radiusMiles === 5) return 10;
-  if (hunt.radiusMiles === 10) return 20;
-  return null;
-});
-const emptyStateTitle = computed(() => searchStore.context ? "No leads match these filters." : "Choose a location first");
-const emptyStateMessage = computed(() => searchStore.context ? `We checked ${discoveredCount.value} properties in this area.` : "Pick a location and then scan a radius to rank opportunities.");
 const scanResultsHasMore = computed(() => hunt.scanResultsHasMore);
 const scanResultsLoading = computed(() => hunt.scanResultsLoading);
-const savedLeadIds = computed(() => results.value.filter((lead) => lead.outcome === "SAVED").map((lead) => lead.propertyId ?? lead.id));
 
 async function startScan() {
   if (startingScan.value || hunt.isScanning) return;
@@ -332,99 +241,12 @@ async function startScan() {
   }
 }
 
-async function saveCurrentSwipeLead() {
-  const lead = swipeDeckLead.value;
-  if (!lead) return;
-  await hunt.setLeadDisposition(lead.propertyId ?? lead.id, "SAVED");
-  showSwipeUndoToast("Lead saved");
-}
-
-async function skipCurrentSwipeLead() {
-  const lead = swipeDeckLead.value;
-  if (!lead) return;
-  await hunt.setLeadDisposition(lead.propertyId ?? lead.id, "SKIPPED");
-  showSwipeUndoToast("Lead skipped");
-}
-
-function navigateCurrentSwipeLead() {
-  const lead = swipeDeckLead.value;
-  if (lead) navigateLead(lead);
-}
-
-function openCurrentSwipeLead() {
-  const lead = swipeDeckLead.value;
-  if (lead) openLead(lead);
-}
-
-async function buildRouteFromSaved() {
-  if (savedLeadIds.value.length === 0) return;
-  await hunt.generateRoute(savedLeadIds.value);
-  await router.push("/labs/route");
-}
-
 async function loadMore() {
   await hunt.loadMoreResults();
 }
 
-async function expandRadius() {
-  if (!nextRadiusSuggestion.value || !searchStore.context) return;
-  hunt.setRadius(nextRadiusSuggestion.value);
-  searchStore.setRadiusMiles(nextRadiusSuggestion.value);
-  await hunt.runScan({ latitude: searchStore.context.latitude, longitude: searchStore.context.longitude }, {
-    radiusMiles: nextRadiusSuggestion.value,
-    filters: searchStore.filters,
-  });
-}
-
-function showSwipeUndoToast(title: string) {
-  const notification = ElNotification({
-    title,
-    message: h(
-      "button",
-      {
-        type: "button",
-        class: "mt-2 inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm hover:border-primary-200 hover:text-primary-600",
-        onClick: async () => {
-          try {
-            await hunt.undoLastSwipeDisposition();
-          } finally {
-            notification.close();
-          }
-        },
-      },
-      "Undo",
-    ),
-    duration: 3500,
-    position: "top-right",
-  });
-}
-
-function openLead(lead: DiscoveryScanLead) {
-  void router.push(`/properties/${encodeURIComponent(lead.propertyId ?? lead.id)}`);
-}
-
-function navigateLead(lead: DiscoveryScanLead) {
-  if (lead.latitude != null && lead.longitude != null) {
-    openDirections(lead.latitude, lead.longitude);
-    return;
-  }
-  openLead(lead);
-}
-
-function leadTitle(lead: DiscoveryScanLead) {
-  return lead.address?.split(",")[0]?.trim() || "Address unavailable";
-}
-
-function leadLocation(lead: DiscoveryScanLead) {
-  return [lead.city, lead.state, lead.postalCode].filter(Boolean).join(", ") || "Location unavailable";
-}
-
-function distanceLabel(distance: number | null | undefined) {
-  return distance == null ? "distance unknown" : `${distance.toFixed(1)} mi`;
-}
-
-function formatNumber(value: number | null | undefined) {
-  return value == null ? "--" : new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+function toggleLead(lead: { propertyId?: string | null; id: string }) {
+  hunt.selectLead(lead.propertyId ?? lead.id);
 }
 </script>
 
