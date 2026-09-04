@@ -26,14 +26,12 @@ const user = useUserStore();
 const items = computed(() => {
   const modules = new Map(PLATFORM_MODULE_REGISTRY.filter((definition) => user.hasModule(definition.id)).map((definition) => [definition.id, definition]));
   let ids: PlatformModule[];
-  if (user.roles.includes(PlatformRole.CLOSER) && user.roles.includes(PlatformRole.SETTER)) {
-    ids = ["APPOINTMENTS", "LEADS", "SCHEDULE", "MORE"];
-  } else if (user.roles.includes(PlatformRole.CLOSER)) {
-    ids = ["APPOINTMENTS", "LEADS", "SCHEDULE", "MORE"];
+  if (user.roles.includes(PlatformRole.CLOSER)) {
+    ids = ["APPOINTMENTS", "FOLLOW_UPS", "LEADS", "MORE"];
   } else if (user.hasModule("TODAY")) {
     ids = ["TODAY", "APPOINTMENTS", "FOLLOW_UPS", "MORE"];
   } else {
-    ids = ["HOME", "LEADS", "SCHEDULE", "MORE"];
+    ids = ["HOME", "FOLLOW_UPS", "LEADS", "MORE"];
   }
   return ids.map((id) => modules.get(id)).filter((item): item is NonNullable<typeof item> => Boolean(item));
 });

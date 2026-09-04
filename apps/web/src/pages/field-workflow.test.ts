@@ -133,8 +133,15 @@ test("mobile lead actions stay compact and do not wrap in the shared page header
   const headerSource = await readFile(new URL("../components/MobileHeader.vue", import.meta.url), "utf8");
 
   assert.match(homeSource, /inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-xl/);
-  assert.match(headerSource, /flex min-w-0 items-start justify-between gap-3/);
-  assert.match(headerSource, /<div class="shrink-0">/);
+  assert.match(headerSource, /flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between/);
+  assert.match(headerSource, /<div class="shrink-0 self-start sm:pt-1">/);
+});
+
+test("mobile bottom navigation keeps follow-ups available in the field workflow", async () => {
+  const source = await readFile(new URL("../components/BottomNavigation.vue", import.meta.url), "utf8");
+
+  assert.match(source, /\["APPOINTMENTS", "FOLLOW_UPS", "LEADS", "MORE"\]/);
+  assert.match(source, /\["HOME", "FOLLOW_UPS", "LEADS", "MORE"\]/);
 });
 
 test("Vercel uses a same-origin API proxy for mobile session cookies", async () => {
