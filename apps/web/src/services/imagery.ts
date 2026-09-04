@@ -21,6 +21,7 @@ export interface PropertyImageryProvider {
 }
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+const useSameOriginApi = typeof window !== "undefined" && window.location.hostname.endsWith(".vercel.app");
 
 export const backendPropertyImageryProvider: PropertyImageryProvider = {
   name: "backend",
@@ -84,7 +85,7 @@ export function buildGoogleMapsDirectionsUrl(latitude: number, longitude: number
 }
 
 function buildApiUrl(path: string) {
-  return apiBaseUrl ? `${apiBaseUrl}${path}` : path;
+  return useSameOriginApi || !apiBaseUrl ? path : `${apiBaseUrl}${path}`;
 }
 
 function buildImageryAlt(

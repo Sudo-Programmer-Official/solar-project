@@ -136,3 +136,15 @@ test("mobile lead actions stay compact and do not wrap in the shared page header
   assert.match(headerSource, /flex min-w-0 items-start justify-between gap-3/);
   assert.match(headerSource, /<div class="shrink-0">/);
 });
+
+test("Vercel uses a same-origin API proxy for mobile session cookies", async () => {
+  const apiSource = await readFile(new URL("../services/api.ts", import.meta.url), "utf8");
+  const notesSource = await readFile(new URL("../services/field-notes.ts", import.meta.url), "utf8");
+  const imagerySource = await readFile(new URL("../services/imagery.ts", import.meta.url), "utf8");
+  const vercelSource = await readFile(new URL("../../vercel.json", import.meta.url), "utf8");
+
+  assert.match(apiSource, /useSameOriginApi/);
+  assert.match(notesSource, /useSameOriginApi/);
+  assert.match(imagerySource, /useSameOriginApi/);
+  assert.match(vercelSource, /solarscout-api-if1a\.onrender\.com\/api\/:path\*/);
+});

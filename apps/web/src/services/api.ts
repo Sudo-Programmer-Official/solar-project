@@ -36,6 +36,7 @@ import type {
 import type { IntelligenceDashboard } from "@solar/analytics-contracts";
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
+const useSameOriginApi = typeof window !== "undefined" && window.location.hostname.endsWith(".vercel.app");
 
 export interface PlatformAuthUser {
   id: string;
@@ -694,7 +695,7 @@ export async function getIntelligenceDashboard(): Promise<IntelligenceDashboard 
 }
 
 function resolveUrl(path: string): string {
-  return baseUrl ? `${baseUrl}${path}` : path;
+  return useSameOriginApi || !baseUrl ? path : `${baseUrl}${path}`;
 }
 
 export async function getApiHealth(): Promise<{ status: "ok"; service: string } | null> {
