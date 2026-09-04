@@ -1,6 +1,6 @@
 <template>
   <main class="min-w-0 overflow-x-hidden px-4 pb-28">
-    <MobileHeader eyebrow="APPOINTMENTS" :title="isManagerBoard ? 'Assignment board' : 'Your appointment queue'" :subtitle="isManagerBoard ? 'Assign the right closer from the row and keep the field team moving.' : 'Open the full lead context, record the outcome, and keep the setter loop current.'">
+    <MobileHeader eyebrow="APPOINTMENTS" :title="isManagerBoard ? 'Assignment board' : 'Appointments'">
       <template #action>
         <div class="flex min-w-0 items-center gap-2">
           <RouterLink v-if="user.can('lead:create')" to="/leads/new" class="touch-target inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-xl bg-primary-500 px-4 py-2.5 text-sm font-semibold leading-5 text-white shadow-sm transition hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-200">+ New lead</RouterLink>
