@@ -1,13 +1,12 @@
 <template>
   <main class="overflow-x-hidden px-4 pb-28">
-    <MobileHeader eyebrow="FOLLOW-UPS" title="Reconnect when they are ready" subtitle="Keep early homeowner conversations out of the lead pipeline until you are ready to promote them.">
-      <template #action><button class="min-h-touch rounded-full border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700" type="button" @click="load">Refresh</button></template>
-    </MobileHeader>
-
     <section class="page-surface border-primary-100 bg-primary-50/60 p-4 sm:p-5">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div><p class="field-label text-primary-700">PRE-LEAD WORKSPACE</p><h2 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Setter follow-ups</h2><p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Capture the next conversation from the doorstep, then create one canonical lead when the homeowner is ready.</p></div>
-        <button class="min-h-touch rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm" type="button" @click="showCreate = !showCreate">{{ showCreate ? "Close form" : "+ New follow-up" }}</button>
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div><p class="field-label text-primary-700">FOLLOW-UPS</p><h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Follow-ups</h1></div>
+        <div class="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+          <button class="min-h-touch rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700" type="button" @click="load">Refresh</button>
+          <button class="min-h-touch rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm" type="button" @click="showCreate = !showCreate">{{ showCreate ? "Close form" : "+ New follow-up" }}</button>
+        </div>
       </div>
       <div class="mt-4 grid grid-cols-3 gap-2 sm:max-w-xl">
         <div class="rounded-2xl bg-white px-3 py-3"><p class="text-xs text-slate-500">Needs attention</p><strong class="mt-1 block text-xl text-amber-700">{{ overdueCount + todayCount }}</strong></div>
@@ -91,7 +90,6 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import MobileHeader from "../components/MobileHeader.vue";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { addFieldFollowUpNote, completeFieldFollowUp, convertFieldFollowUpToLead, createFieldFollowUp, getFieldFollowUps, rescheduleFieldFollowUp, type FieldFollowUp, type FieldFollowUpActivity } from "../services/api";
 

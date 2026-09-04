@@ -144,6 +144,14 @@ test("mobile bottom navigation keeps follow-ups available in the field workflow"
   assert.match(source, /\["HOME", "FOLLOW_UPS", "LEADS", "MORE"\]/);
 });
 
+test("follow-ups page keeps the mobile workspace focused", async () => {
+  const source = await readFile(new URL("./FollowUps.vue", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /Reconnect when they are ready/);
+  assert.doesNotMatch(source, /Keep early homeowner conversations out of the lead pipeline/);
+  assert.match(source, /<h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Follow-ups<\/h1>/);
+});
+
 test("Vercel uses a same-origin API proxy for mobile session cookies", async () => {
   const apiSource = await readFile(new URL("../services/api.ts", import.meta.url), "utf8");
   const notesSource = await readFile(new URL("../services/field-notes.ts", import.meta.url), "utf8");
