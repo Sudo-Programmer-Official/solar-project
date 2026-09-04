@@ -10,6 +10,7 @@ test("platform permissions keep Labs separate from manager operations", () => {
   assert.equal(platformRoleCan(PlatformRole.SETTER, "appointment:assign"), false);
   assert.equal(platformRoleCan(PlatformRole.CLOSER, "appointment:view-assigned"), true);
   assert.equal(platformRoleCan(PlatformRole.CLOSER, "appointment:create"), false);
+  assert.equal(platformRoleCan(PlatformRole.CLOSER, "lead:create"), true);
   assert.equal(platformRoleCan(PlatformRole.SUPER_ADMIN, "system:manage"), true);
 });
 

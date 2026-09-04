@@ -1,7 +1,7 @@
 <template>
   <main class="box-border w-full min-w-0 max-w-full overflow-x-hidden px-4 pb-28">
     <div class="mx-auto box-border w-full min-w-0 max-w-3xl">
-      <MobileHeader eyebrow="LEADS" title="Create a lead" subtitle="Homeowner, bill, notes, then choose one of six field times.">
+      <MobileHeader eyebrow="LEADS" title="Create a lead" :subtitle="user.can('appointment:create') ? 'Homeowner, bill, notes, then choose one of six field times.' : 'Capture homeowner details and notes for the team to schedule later.'">
         <template #action><RouterLink to="/leads" class="touch-target inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">All leads</RouterLink></template>
       </MobileHeader>
 
@@ -47,7 +47,7 @@
             <p class="mt-2 text-xs text-slate-500">Notes are added to the activity history and can be extended later.</p>
           </div>
 
-          <section class="box-border w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:p-5">
+          <section v-if="user.can('appointment:create')" class="box-border w-full min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4 pb-[calc(7rem+env(safe-area-inset-bottom))] sm:p-5">
             <div class="flex min-w-0 items-start justify-between gap-3">
               <div class="min-w-0 flex-1">
                 <p class="field-label text-primary-700">APPOINTMENT <span class="tracking-normal text-slate-500">OPTIONAL</span></p>
@@ -88,9 +88,11 @@ import MobileHeader from "../components/MobileHeader.vue";
 import OperationalSlotPicker from "../components/OperationalSlotPicker.vue";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { addFieldNote, createFieldLead, createFieldLeadWithAppointment, getFieldOperationalSlots, uploadFieldBill, type FieldOperationalSlot } from "../services/api";
+import { useUserStore } from "../stores/user.store";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const user = useUserStore();
 const billInput = ref<HTMLInputElement | null>(null);
 const draft = ref({ homeownerName: "", phone: "", email: "", propertyAddress: "", addressLine1: "", city: "", state: "", postalCode: "", notes: "" });
 const billFile = ref<File | null>(null);

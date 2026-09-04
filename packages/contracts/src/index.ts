@@ -1309,6 +1309,7 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRole, readonly PlatformPe
     "reports:view-own",
   ],
   CLOSER: [
+    "lead:create",
     "lead:update-own",
     "lead:view-assigned",
     "appointment:view-assigned",

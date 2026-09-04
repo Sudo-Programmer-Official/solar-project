@@ -148,7 +148,7 @@ const draftRole = computed<PlatformRole>({
 });
 const roleDefinitions: Array<{ code: PlatformRole; name: string; description: string; permissions: readonly PlatformPermission[] | readonly ["*"] }> = [
   { code: PlatformRole.SETTER, name: "Setter", description: "Captures leads, creates appointments, uploads bills, and owns the early pipeline.", permissions: PLATFORM_ROLE_PERMISSIONS.SETTER },
-  { code: PlatformRole.CLOSER, name: "Closer", description: "Works assigned appointments, captures outcomes, and keeps appointment context current. Add Setter for lead capture.", permissions: PLATFORM_ROLE_PERMISSIONS.CLOSER },
+  { code: PlatformRole.CLOSER, name: "Closer", description: "Works assigned appointments, captures outcomes, keeps appointment context current, and can create leads from the field.", permissions: PLATFORM_ROLE_PERMISSIONS.CLOSER },
   { code: PlatformRole.MANAGER, name: "Manager", description: "Runs team operations, assignments, reporting, and territory visibility.", permissions: PLATFORM_ROLE_PERMISSIONS.MANAGER },
   { code: PlatformRole.ADMIN, name: "Admin", description: "Manages users, roles, territory configuration, and operational reporting.", permissions: PLATFORM_ROLE_PERMISSIONS.ADMIN },
   { code: PlatformRole.SUPER_ADMIN, name: "Super Admin", description: "Full platform access, Labs, and system configuration.", permissions: ["*"] },
