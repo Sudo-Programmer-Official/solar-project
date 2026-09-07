@@ -128,6 +128,14 @@ test("mobile navigation drawer keeps permission-driven links compact and closes 
   assert.match(appSource, /bg-transparent text-slate-300/);
 });
 
+test("property finder header is scoped to Labs routes", async () => {
+  const appSource = await readFile(new URL("../App.vue", import.meta.url), "utf8");
+
+  assert.match(appSource, /isLabsRoute/);
+  assert.match(appSource, /v-if="isLabsRoute && user\.hasModule\('LABS'\)"/);
+  assert.match(appSource, /v-if="isLabsRoute && user\.hasModule\('LABS'\) && showScanProgress/);
+});
+
 test("mobile lead actions stay compact and do not wrap in the shared page header", async () => {
   const homeSource = await readFile(new URL("./Home.vue", import.meta.url), "utf8");
   const headerSource = await readFile(new URL("../components/MobileHeader.vue", import.meta.url), "utf8");
