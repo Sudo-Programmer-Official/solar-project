@@ -136,6 +136,18 @@ test("property finder header is scoped to Labs routes", async () => {
   assert.match(appSource, /v-if="isLabsRoute && user\.hasModule\('LABS'\) && showScanProgress/);
 });
 
+test("property detail drawer keeps its controls fixed while preserving page scroll", async () => {
+  const source = await readFile(new URL("../components/PropertyDetailDrawer.vue", import.meta.url), "utf8");
+
+  assert.match(source, /<Teleport to="body">/);
+  assert.match(source, /fixed right-0 top-0 z-50 flex h-\[100dvh\] max-h-\[100dvh\]/);
+  assert.match(source, /sticky top-0 z-\[60\]/);
+  assert.match(source, /min-h-0 flex-1 overflow-y-auto overscroll-contain/);
+  assert.match(source, /document\.body\.style\.position = "fixed"/);
+  assert.match(source, /document\.body\.style\.top = `-\$\{previousScrollY\}px`/);
+  assert.match(source, /window\.scrollTo\(0, previousScrollY\)/);
+});
+
 test("mobile lead actions stay compact and do not wrap in the shared page header", async () => {
   const homeSource = await readFile(new URL("./Home.vue", import.meta.url), "utf8");
   const headerSource = await readFile(new URL("../components/MobileHeader.vue", import.meta.url), "utf8");
