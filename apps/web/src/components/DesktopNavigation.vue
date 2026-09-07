@@ -74,7 +74,7 @@
         ]"
       >
         <span v-if="collapsed && mode === 'desktop'" class="inline-flex h-8 w-8 items-center justify-center rounded-xl text-xs font-bold" :class="isActive(item.route) ? 'bg-cyan-100 text-cyan-800' : 'bg-slate-100 text-slate-600'">{{ item.label.charAt(0) }}</span>
-        <span v-else>{{ item.label }}</span>
+        <span v-else>{{ itemLabel(item) }}</span>
       </RouterLink>
     </nav>
 
@@ -108,6 +108,7 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { PlatformRole, PLATFORM_MODULE_REGISTRY } from "@solar/contracts";
 import { useUserStore } from "../stores/user.store";
+import { useHuntStore } from "../stores/hunt.store";
 
 withDefaults(defineProps<{ mode?: "desktop" | "drawer"; collapsed?: boolean; locked?: boolean }>(), {
   mode: "desktop",
@@ -125,6 +126,7 @@ const emit = defineEmits<{
 const route = useRoute();
 const router = useRouter();
 const user = useUserStore();
+const hunt = useHuntStore();
 const items = computed(() => PLATFORM_MODULE_REGISTRY.filter((definition) => {
   if (!user.hasModule(definition.id) || definition.parent || definition.id === "MORE") return false;
   if (definition.id === "HOME" && (user.hasModule("OPERATIONS") || (user.roles.includes(PlatformRole.CLOSER) && !user.roles.includes(PlatformRole.SETTER)))) return false;
@@ -133,6 +135,12 @@ const items = computed(() => PLATFORM_MODULE_REGISTRY.filter((definition) => {
 
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(`${path}/`);
+}
+
+function itemLabel(item: (typeof items.value)[number]): string {
+  return item.id === "ROUTE_EXPERIMENT" && hunt.savedRouteCount > 0
+    ? item.label + " (" + hunt.savedRouteCount + ")"
+    : item.label;
 }
 
 async function handleLogout(): Promise<void> {

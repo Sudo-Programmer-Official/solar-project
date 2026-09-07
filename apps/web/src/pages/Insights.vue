@@ -17,7 +17,9 @@
       <div class="mt-3 flex flex-wrap gap-2"><span v-for="item in fieldReport.byOutcome" :key="item.outcome" class="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">{{ item.outcome.replaceAll("_", " ") }} · {{ item.count }}</span></div>
     </section>
 
-    <section v-if="error && !dashboard" class="page-surface border-amber-200 bg-amber-50 p-5">
+    <PageSkeleton v-if="showLoading && !dashboard" variant="metrics" />
+
+    <section v-else-if="error && !dashboard" class="page-surface border-amber-200 bg-amber-50 p-5">
       <p class="field-label text-amber-700">Insights unavailable</p>
       <p class="mt-2 text-sm leading-6 text-amber-900">{{ error }}</p>
       <button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white" type="button" @click="loadDashboard">
@@ -100,6 +102,8 @@
 import { computed, onMounted, ref } from "vue";
 import type { IntelligenceDashboard, TerritorySummary } from "@solar/analytics-contracts";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { getFieldReport, getIntelligenceDashboard, type FieldReport } from "../services/api";
 import { useUserStore } from "../stores/user.store";
 
@@ -108,6 +112,8 @@ const canViewIntelligence = computed(() => user.can("analytics:view") || user.ca
 const dashboard = ref<IntelligenceDashboard | null>(null);
 const fieldReport = ref<FieldReport | null>(null);
 const error = ref("");
+const loading = ref(false);
+const showLoading = useDelayedLoading(loading);
 
 const metrics = computed(() => dashboard.value ? [
   { label: "Total sets", value: dashboard.value.metrics.totalSets.toLocaleString(), note: "normalized records" },
@@ -121,12 +127,16 @@ const metrics = computed(() => dashboard.value ? [
 onMounted(() => { void Promise.all([canViewIntelligence.value ? loadDashboard() : Promise.resolve(), loadFieldReport()]); });
 
 async function loadDashboard() {
+  if (loading.value) return;
+  loading.value = true;
   error.value = "";
   try {
     dashboard.value = await getIntelligenceDashboard();
     if (!dashboard.value) throw new Error("Territory intelligence is not available.");
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "Territory intelligence is not available.";
+  } finally {
+    loading.value = false;
   }
 }
 

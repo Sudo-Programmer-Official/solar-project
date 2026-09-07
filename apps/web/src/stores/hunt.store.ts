@@ -10,10 +10,22 @@ import type {
   LeadOutcomeCard,
   RouteNextResponse,
   RoutePlan,
+  SavedRoute,
 } from "@solar/contracts";
-import { createRoute, getDiscoveryScan, getDiscoveryScanResults, getRouteNext, startDiscoveryScan } from "../services/api";
+import {
+  addSavedRouteItem,
+  clearSavedRoute as clearSavedRouteRequest,
+  createRoute,
+  getDiscoveryScan,
+  getDiscoveryScanResults,
+  getRouteNext,
+  getSavedRoute,
+  removeSavedRouteItem,
+  startDiscoveryScan,
+} from "../services/api";
 import { useSearchContextStore } from "./search-context.store";
 import { useLeadOutcomeStore } from "./lead-outcome.store";
+import { useFeedbackStore } from "./feedback.store";
 
 const defaultFilters: DiscoveryScanFilters = {
   whaleCandidates: false,
@@ -40,6 +52,10 @@ export const useHuntStore = defineStore("hunt", () => {
   const scanResultsLoading = ref(false);
   const routePlan = ref<RoutePlan | null>(null);
   const routeProgress = ref<RouteNextResponse | null>(null);
+  const savedRoute = ref<SavedRoute | null>(null);
+  const savedRouteLoading = ref(false);
+  const savedRouteError = ref<string | null>(null);
+  const routeMutationIds = ref(new Set<string>());
   const selectedPropertyIds = ref<string[]>([]);
   const skippedPropertyIds = ref<string[]>([]);
   const loading = ref(false);
@@ -56,6 +72,8 @@ export const useHuntStore = defineStore("hunt", () => {
     const selected = new Set(visibleSelectedPropertyIds.value);
     return scanResults.value.filter((lead) => selected.has(lead.propertyId ?? lead.id));
   });
+  const savedRouteItems = computed(() => savedRoute.value?.items ?? []);
+  const savedRouteCount = computed(() => savedRouteItems.value.length);
   const currentStop = computed(() => {
     const route = routeProgress.value?.route ?? routePlan.value;
     if (!route) return null;
@@ -128,12 +146,64 @@ export const useHuntStore = defineStore("hunt", () => {
     setFilter(key, !current);
   }
 
-  function selectLead(propertyId: string) {
-    if (selectedPropertyIds.value.includes(propertyId)) {
-      selectedPropertyIds.value = selectedPropertyIds.value.filter((item) => item !== propertyId);
-      return;
+  async function loadSavedRoute() {
+    if (savedRouteLoading.value) return savedRoute.value;
+    savedRouteLoading.value = true;
+    savedRouteError.value = null;
+    try {
+      savedRoute.value = await getSavedRoute();
+      selectedPropertyIds.value = savedRouteItems.value.map((item) => item.propertyId);
+      return savedRoute.value;
+    } catch (cause) {
+      savedRouteError.value = cause instanceof Error ? cause.message : "Route could not be loaded.";
+      return savedRoute.value;
+    } finally {
+      savedRouteLoading.value = false;
     }
-    selectedPropertyIds.value = [...selectedPropertyIds.value, propertyId];
+  }
+
+  async function toggleSavedRouteItem(propertyId: string) {
+    if (routeMutationIds.value.has(propertyId)) return savedRoute.value;
+    routeMutationIds.value = new Set([...routeMutationIds.value, propertyId]);
+    const wasSelected = selectedPropertyIds.value.includes(propertyId);
+    if (wasSelected) {
+      selectedPropertyIds.value = selectedPropertyIds.value.filter((item) => item !== propertyId);
+    } else {
+      selectedPropertyIds.value = [...selectedPropertyIds.value, propertyId];
+    }
+    const feedback = useFeedbackStore();
+    try {
+      const nextRoute = wasSelected
+        ? await removeSavedRouteItem(propertyId)
+        : await addSavedRouteItem(propertyId, lastLatitude.value, lastLongitude.value);
+      savedRoute.value = nextRoute;
+      selectedPropertyIds.value = savedRouteItems.value.map((item) => item.propertyId);
+      feedback.success(
+        wasSelected ? "Removed from route" : "Added to route",
+        wasSelected ? undefined : { label: "View route", route: "/labs/route" },
+      );
+      return nextRoute;
+    } catch (cause) {
+      selectedPropertyIds.value = savedRouteItems.value.map((item) => item.propertyId);
+      feedback.failure(cause instanceof Error ? cause.message : "Route could not be updated.");
+      throw cause;
+    } finally {
+      const nextPending = new Set(routeMutationIds.value);
+      nextPending.delete(propertyId);
+      routeMutationIds.value = nextPending;
+    }
+  }
+
+  function selectLead(propertyId: string) {
+    void toggleSavedRouteItem(propertyId).catch(() => undefined);
+  }
+
+  async function clearSavedRoute() {
+    await clearSavedRouteRequest();
+    savedRoute.value = null;
+    selectedPropertyIds.value = [];
+    routePlan.value = null;
+    routeProgress.value = null;
   }
 
   function resetSelection() {
@@ -234,8 +304,7 @@ export const useHuntStore = defineStore("hunt", () => {
       if (scanResults.value.length === 0 && currentScanId.value) {
         await loadScanResultsPage({ reset: true, scanId: job.scanId, sessionId });
       }
-      const visibleIds = new Set(scanResults.value.map((lead) => lead.propertyId ?? lead.id));
-      selectedPropertyIds.value = selectedPropertyIds.value.filter((propertyId) => visibleIds.has(propertyId));
+      selectedPropertyIds.value = savedRouteItems.value.map((item) => item.propertyId);
       return scan.value ?? emptyScanResult(committedRadius, center);
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : "Unable to scan area";
@@ -247,8 +316,10 @@ export const useHuntStore = defineStore("hunt", () => {
     }
   }
 
-  async function generateRoute(selectedPropertyIdsOverride?: string[]) {
-    if (lastLatitude.value == null || lastLongitude.value == null) {
+  async function generateRoute(selectedPropertyIdsOverride?: string[], startingPoint?: { latitude: number; longitude: number }) {
+    const startingLatitude = startingPoint?.latitude ?? lastLatitude.value;
+    const startingLongitude = startingPoint?.longitude ?? lastLongitude.value;
+    if (startingLatitude == null || startingLongitude == null) {
       throw new Error("Scan location is missing.");
     }
     const selected = selectedPropertyIdsOverride?.length
@@ -263,8 +334,8 @@ export const useHuntStore = defineStore("hunt", () => {
     error.value = null;
     try {
       routePlan.value = await createRoute({
-        startingLatitude: lastLatitude.value,
-        startingLongitude: lastLongitude.value,
+        startingLatitude,
+        startingLongitude,
         selectedPropertyIds: selected,
       });
       if (!routePlan.value) {
@@ -373,6 +444,12 @@ export const useHuntStore = defineStore("hunt", () => {
     scanResultsLoading,
     routePlan,
     routeProgress,
+    savedRoute,
+    savedRouteItems,
+    savedRouteCount,
+    savedRouteLoading,
+    savedRouteError,
+    routeMutationIds,
     selectedPropertyIds,
     skippedPropertyIds,
     lastSwipeAction,
@@ -405,6 +482,9 @@ export const useHuntStore = defineStore("hunt", () => {
     setMinCapacity,
     toggleFilter,
     selectLead,
+    loadSavedRoute,
+    toggleSavedRouteItem,
+    clearSavedRoute,
     resetSelection,
     runScan,
     loadMoreResults,

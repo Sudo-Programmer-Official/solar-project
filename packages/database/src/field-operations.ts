@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SqlClient } from "./repository";
 import type { OperationalOverflowPolicy } from "./operational-slots";
+import type { SavedRoute } from "../../contracts/src/index";
 
 export type FieldLeadStatus =
   | "KNOCKED" | "INTERESTED" | "FOLLOW_UP" | "APPOINTMENT_SET" | "NO_SHOW"
@@ -308,6 +309,10 @@ export interface FieldOperationsRepository {
   addFollowUpNote(input: { id: string; actorId: string; body: string; isTestData?: boolean }): Promise<FieldFollowUp | null>;
   convertFollowUpToLead(input: { followUpId: string; setterId: string; teamId?: string | null; isTestData?: boolean }): Promise<{ followUp: FieldFollowUp; lead: FieldLead } | null>;
   convertFollowUpToAppointment(input: { followUpId: string; slotId?: string; operationalSlotId?: string; allowOverflow?: boolean; setterId: string; appointmentType?: string; isTestData?: boolean }): Promise<{ followUp: FieldFollowUp; appointment: FieldAppointment } | null>;
+  getSavedRoute?(input: { userId: string; teamId?: string | null }): Promise<SavedRoute | null>;
+  addSavedRouteItem?(input: { userId: string; teamId?: string | null; propertyId: string; startingLatitude?: number | null; startingLongitude?: number | null }): Promise<SavedRoute | null>;
+  removeSavedRouteItem?(input: { userId: string; teamId?: string | null; propertyId: string }): Promise<SavedRoute | null>;
+  clearSavedRoute?(input: { userId: string; teamId?: string | null }): Promise<void>;
   getReport(input: { userId: string; teamIds: string[] | null; scope: FieldListScope }): Promise<{ leadCount: number; appointmentCount: number; byStatus: Array<{ status: string; count: number }>; byOutcome: Array<{ outcome: string; count: number }>; sync: { pending: number; synced: number; failed: number }; capacity: { standard: number; booked: number; remaining: number; overflow: number }; unassignedCount: number; confirmedCount: number; cancelledCount: number; cancellationReasons: Array<{ reason: string; count: number }> }>;
   cleanTestData(): Promise<TestFieldDataCleanupSummary>;
 }
@@ -1270,6 +1275,63 @@ export class PostgresFieldOperationsRepository implements FieldOperationsReposit
     });
   }
 
+  async getSavedRoute(input: { userId: string; teamId?: string | null }): Promise<SavedRoute | null> {
+    const route = await findSavedRoute(this.client, input);
+    return route ? hydrateSavedRoute(this.client, route) : null;
+  }
+
+  async addSavedRouteItem(input: { userId: string; teamId?: string | null; propertyId: string; startingLatitude?: number | null; startingLongitude?: number | null }): Promise<SavedRoute | null> {
+    return this.withTransaction(async (client) => {
+      const route = await getOrCreateSavedRoute(client, input);
+      const property = await client.query<{ id: string }>("SELECT id FROM properties WHERE id = $1", [input.propertyId]);
+      if (!route || !property.rows[0]) return null;
+
+      await client.query("SELECT id FROM field_ops.routes WHERE id = $1 FOR UPDATE", [route.id]);
+      await client.query(
+        `INSERT INTO field_ops.route_items (id, route_id, property_id, position)
+         SELECT $1, $2, $3, COALESCE(MAX(position) + 1, 0)
+         FROM field_ops.route_items
+         WHERE route_id = $2
+         ON CONFLICT (route_id, property_id) DO NOTHING`,
+        [randomUUID(), route.id, input.propertyId],
+      );
+      await client.query("UPDATE field_ops.routes SET updated_at = NOW() WHERE id = $1", [route.id]);
+      const hydratedRoute = await findSavedRoute(client, input);
+      return hydratedRoute ? hydrateSavedRoute(client, hydratedRoute) : null;
+    });
+  }
+
+  async removeSavedRouteItem(input: { userId: string; teamId?: string | null; propertyId: string }): Promise<SavedRoute | null> {
+    return this.withTransaction(async (client) => {
+      const route = await findSavedRoute(client, input);
+      if (!route) return null;
+      await client.query(
+        `DELETE FROM field_ops.route_items
+         WHERE route_id = $1 AND property_id = $2`,
+        [route.id, input.propertyId],
+      );
+      await client.query("UPDATE field_ops.routes SET updated_at = NOW() WHERE id = $1", [route.id]);
+      const hydratedRoute = await findSavedRoute(client, input);
+      return hydratedRoute ? hydrateSavedRoute(client, hydratedRoute) : null;
+    });
+  }
+
+  async clearSavedRoute(input: { userId: string; teamId?: string | null }): Promise<void> {
+    await this.withTransaction(async (client) => {
+      await client.query(
+        `DELETE FROM field_ops.routes
+         WHERE id IN (
+           SELECT id
+           FROM field_ops.routes
+           WHERE status = 'ACTIVE'
+             AND ((team_id = $1::uuid) OR ($1::uuid IS NULL AND owner_user_id = $2::uuid))
+           LIMIT 1
+         )`,
+        [input.teamId ?? null, input.userId],
+      );
+    });
+  }
+
   async getReport(input: { userId: string; teamIds: string[] | null; scope: FieldListScope }): Promise<{ leadCount: number; appointmentCount: number; byStatus: Array<{ status: string; count: number }>; byOutcome: Array<{ outcome: string; count: number }>; sync: { pending: number; synced: number; failed: number }; capacity: { standard: number; booked: number; remaining: number; overflow: number }; unassignedCount: number; confirmedCount: number; cancelledCount: number; cancellationReasons: Array<{ reason: string; count: number }> }> {
     await this.listOperationalSlots({ from: new Date().toISOString(), to: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), teamIds: input.teamIds });
     const leadFilter = scopeFilter("l", input.scope, input.userId, input.teamIds, 1);
@@ -1382,6 +1444,139 @@ interface FollowUpConversionRow {
   reason: string; note: string; homeowner_name: string; phone: string | null; email: string | null; address_line1: string;
   city: string | null; state: string | null; postal_code: string | null; latitude: number | string | null; longitude: number | string | null;
   status: FieldFollowUpStatus; converted_lead_id: string | null; is_test_data: boolean;
+}
+
+interface SavedRouteRow {
+  id: string;
+  owner_user_id: string;
+  team_id: string | null;
+  status: "ACTIVE";
+  starting_latitude: number | string | null;
+  starting_longitude: number | string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+interface SavedRouteItemRow {
+  id: string;
+  route_id: string;
+  property_id: string;
+  position: number | string;
+  status: SavedRoute["items"][number]["status"];
+  added_at: string | Date;
+  address: string;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
+  distance_miles: number | string | null;
+  opportunity_score: number | string | null;
+}
+
+async function findSavedRoute(client: SqlClient, input: { userId: string; teamId?: string | null }): Promise<SavedRouteRow | null> {
+  const result = await client.query<SavedRouteRow>(
+    `SELECT id, owner_user_id, team_id, status, starting_latitude, starting_longitude, created_at, updated_at
+     FROM field_ops.routes
+     WHERE status = 'ACTIVE'
+       AND ((team_id = $1::uuid) OR ($1::uuid IS NULL AND owner_user_id = $2::uuid))
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [input.teamId ?? null, input.userId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function getOrCreateSavedRoute(
+  client: SqlClient,
+  input: { userId: string; teamId?: string | null; startingLatitude?: number | null; startingLongitude?: number | null },
+): Promise<SavedRouteRow | null> {
+  const existing = await findSavedRoute(client, input);
+  if (existing) {
+    if (existing.starting_latitude == null && input.startingLatitude != null) {
+      await client.query(
+        `UPDATE field_ops.routes
+         SET starting_latitude = $2, starting_longitude = $3, updated_at = NOW()
+         WHERE id = $1`,
+        [existing.id, input.startingLatitude, input.startingLongitude ?? null],
+      );
+    }
+    const refreshed = await findSavedRoute(client, input);
+    return refreshed ?? existing;
+  }
+
+  const inserted = await client.query<SavedRouteRow>(
+    `INSERT INTO field_ops.routes
+       (id, owner_user_id, team_id, status, starting_latitude, starting_longitude)
+     VALUES ($1, $2, $3, 'ACTIVE', $4, $5)
+     ON CONFLICT DO NOTHING
+     RETURNING id, owner_user_id, team_id, status, starting_latitude, starting_longitude, created_at, updated_at`,
+    [randomUUID(), input.userId, input.teamId ?? null, input.startingLatitude ?? null, input.startingLongitude ?? null],
+  );
+  return inserted.rows[0] ?? findSavedRoute(client, input);
+}
+
+async function hydrateSavedRoute(client: SqlClient, route: SavedRouteRow): Promise<SavedRoute> {
+  const items = await client.query<SavedRouteItemRow>(
+    `SELECT ri.id, ri.route_id, ri.property_id, ri.position, ri.status, ri.added_at,
+            COALESCE(NULLIF(p.street, ''), NULLIF(p.normalized_address, ''), 'Address unavailable') AS address,
+            p.city, p.state, p.postal_code, p.latitude, p.longitude,
+            CASE
+              WHEN r.starting_latitude IS NOT NULL
+               AND r.starting_longitude IS NOT NULL
+               AND p.latitude IS NOT NULL
+               AND p.longitude IS NOT NULL
+              THEN ST_Distance(
+                ST_SetSRID(ST_MakePoint(p.longitude, p.latitude), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(r.starting_longitude, r.starting_latitude), 4326)::geography
+              ) / 1609.344
+              ELSE NULL
+            END AS distance_miles,
+            COALESCE(oa.overall_opportunity_score, oa.field_priority_score, 0) AS opportunity_score
+       FROM field_ops.route_items ri
+       JOIN field_ops.routes r ON r.id = ri.route_id
+       JOIN properties p ON p.id = ri.property_id
+       LEFT JOIN LATERAL (
+         SELECT overall_opportunity_score, field_priority_score
+         FROM opportunity_assessments
+         WHERE property_id = p.id
+         ORDER BY created_at DESC
+         LIMIT 1
+       ) oa ON TRUE
+      WHERE ri.route_id = $1
+      ORDER BY ri.position ASC, ri.added_at ASC`,
+    [route.id],
+  );
+  return {
+    id: route.id,
+    ownerUserId: route.owner_user_id,
+    teamId: route.team_id,
+    status: "ACTIVE",
+    startingLatitude: numberOrNull(route.starting_latitude),
+    startingLongitude: numberOrNull(route.starting_longitude),
+    items: items.rows.map(toSavedRouteItem),
+    createdAt: iso(route.created_at),
+    updatedAt: iso(route.updated_at),
+  };
+}
+
+function toSavedRouteItem(row: SavedRouteItemRow): SavedRoute["items"][number] {
+  return {
+    id: row.id,
+    routeId: row.route_id,
+    propertyId: row.property_id,
+    position: Number(row.position),
+    status: row.status,
+    addedAt: iso(row.added_at),
+    address: row.address,
+    city: row.city ?? null,
+    state: row.state ?? null,
+    postalCode: row.postal_code ?? null,
+    latitude: numberOrNull(row.latitude),
+    longitude: numberOrNull(row.longitude),
+    distanceMiles: numberOrNull(row.distance_miles),
+    opportunityScore: numberOrNull(row.opportunity_score) ?? 0,
+  };
 }
 
 function scopeFilter(alias: string, scope: FieldListScope, userId: string, teamIds: string[] | null, userParam: number): { sql: string; params: unknown[] } {

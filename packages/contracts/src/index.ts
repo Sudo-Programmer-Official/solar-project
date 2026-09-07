@@ -1049,6 +1049,37 @@ export interface RouteNextResponse {
   route: RoutePlan;
 }
 
+export type SavedRouteItemStatus = "ADDED" | "VISITED" | "SKIPPED";
+
+export interface SavedRouteItem {
+  id: string;
+  routeId: string;
+  propertyId: string;
+  position: number;
+  status: SavedRouteItemStatus;
+  addedAt: string;
+  address: string;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  distanceMiles: number | null;
+  opportunityScore: number;
+}
+
+export interface SavedRoute {
+  id: string;
+  ownerUserId: string;
+  teamId: string | null;
+  status: "ACTIVE";
+  startingLatitude: number | null;
+  startingLongitude: number | null;
+  items: SavedRouteItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface OpportunityAssessment {
   id: string;
   propertyId: string;
@@ -1213,7 +1244,7 @@ export const PLATFORM_MODULE_REGISTRY: readonly PlatformModuleDefinition[] = [
   { id: "LEAD_FINDER", label: "Lead Finder", route: "/labs/lead-finder", permission: "labs:view", feature: "leadFinderEnabled", parent: "LABS" },
   { id: "HOOD_NAVIGATOR", label: "Hood Navigator", route: "/labs/hood-navigator", permission: "labs:view", parent: "LABS" },
   { id: "INSTALLATION_SIGNALS", label: "Installation Signals", route: "/labs/installation-signals", permission: "labs:view", feature: "installationSignalsEnabled", parent: "LABS" },
-  { id: "ROUTE_EXPERIMENT", label: "Route Experiments", route: "/labs/route", permission: "labs:view", feature: "routeOptimizerEnabled", parent: "LABS" },
+  { id: "ROUTE_EXPERIMENT", label: "Route", route: "/labs/route", permission: "labs:view", feature: "leadFinderEnabled", parent: "LABS" },
 ];
 
 export function resolvePlatformModules(

@@ -16,7 +16,7 @@ import type {
   FieldListScope,
   FieldOperationsRepository,
 } from "../../../packages/database/src/index";
-import type { PlatformPermission } from "../../../packages/contracts/src/index";
+import type { PlatformPermission, SavedRoute } from "../../../packages/contracts/src/index";
 import type { OperationalOverflowPolicy } from "../../../packages/database/src/operational-slots";
 import type { AuthenticatedPlatformUser } from "./platform-auth";
 import { PlatformHttpError, requireLeadScope, requirePermission } from "./platform-auth";
@@ -249,6 +249,44 @@ export class FieldOperationsService {
     const canViewOwn = user.permissions.includes("*" as PlatformPermission) || (user.permissions.includes("followup:view-own") && followUp.ownerUserId === user.id);
     if (!canViewTeam && !canViewOwn) throw new PlatformHttpError(403, "You do not have access to this follow-up.", "FOLLOW_UP_FORBIDDEN");
     return followUp;
+  }
+
+  async getSavedRoute(user: AuthenticatedPlatformUser): Promise<SavedRoute | null> {
+    requireAny(user, ["labs:view", "lead:create", "lead:view-own", "lead:view-team", "lead:view-all"]);
+    if (!this.repository.getSavedRoute) throw new PlatformHttpError(503, "Route workspace is not available until the database is migrated.", "ROUTE_NOT_MIGRATED");
+    return this.repository.getSavedRoute({ userId: user.id, teamId: user.teamIds[0] ?? null });
+  }
+
+  async addSavedRouteItem(user: AuthenticatedPlatformUser, propertyId: string, startingLatitude?: number | null, startingLongitude?: number | null): Promise<SavedRoute> {
+    requireAny(user, ["labs:view", "lead:create", "lead:view-own", "lead:view-team", "lead:view-all"]);
+    if (!this.repository.addSavedRouteItem) throw new PlatformHttpError(503, "Route workspace is not available until the database is migrated.", "ROUTE_NOT_MIGRATED");
+    if (startingLatitude != null && (!Number.isFinite(startingLatitude) || startingLatitude < -90 || startingLatitude > 90)) {
+      throw new PlatformHttpError(400, "startingLatitude must be a valid latitude.", "ROUTE_LOCATION_INVALID");
+    }
+    if (startingLongitude != null && (!Number.isFinite(startingLongitude) || startingLongitude < -180 || startingLongitude > 180)) {
+      throw new PlatformHttpError(400, "startingLongitude must be a valid longitude.", "ROUTE_LOCATION_INVALID");
+    }
+    const route = await this.repository.addSavedRouteItem({
+      userId: user.id,
+      teamId: user.teamIds[0] ?? null,
+      propertyId,
+      startingLatitude: startingLatitude ?? null,
+      startingLongitude: startingLongitude ?? null,
+    });
+    if (!route) throw new PlatformHttpError(404, "That property is no longer available to add.", "ROUTE_PROPERTY_NOT_FOUND");
+    return route;
+  }
+
+  async removeSavedRouteItem(user: AuthenticatedPlatformUser, propertyId: string): Promise<SavedRoute | null> {
+    requireAny(user, ["labs:view", "lead:create", "lead:view-own", "lead:view-team", "lead:view-all"]);
+    if (!this.repository.removeSavedRouteItem) throw new PlatformHttpError(503, "Route workspace is not available until the database is migrated.", "ROUTE_NOT_MIGRATED");
+    return this.repository.removeSavedRouteItem({ userId: user.id, teamId: user.teamIds[0] ?? null, propertyId });
+  }
+
+  async clearSavedRoute(user: AuthenticatedPlatformUser): Promise<void> {
+    requireAny(user, ["labs:view", "lead:create", "lead:view-own", "lead:view-team", "lead:view-all"]);
+    if (!this.repository.clearSavedRoute) throw new PlatformHttpError(503, "Route workspace is not available until the database is migrated.", "ROUTE_NOT_MIGRATED");
+    await this.repository.clearSavedRoute({ userId: user.id, teamId: user.teamIds[0] ?? null });
   }
 
   async createFollowUp(user: AuthenticatedPlatformUser, input: { leadId?: string | null; teamId?: string | null; dueAt?: string | null; dueDaypart?: string | null; homeownerName?: string | null; phone?: string | null; email?: string | null; addressLine1?: string | null; city?: string | null; state?: string | null; postalCode?: string | null; latitude?: number | null; longitude?: number | null; reason: string; note?: string }): Promise<FieldFollowUp> {

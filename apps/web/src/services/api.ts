@@ -32,6 +32,7 @@ import type {
   PlatformRole,
   PlatformFeatureFlags,
   PlatformModule,
+  SavedRoute,
 } from "@solar/contracts";
 import type { IntelligenceDashboard } from "@solar/analytics-contracts";
 
@@ -555,6 +556,30 @@ export async function createFieldOperationalAppointment(leadId: string, operatio
 export async function getFieldAppointments(): Promise<FieldAppointment[]> {
   const response = await requestPlatformJson<{ appointments: FieldAppointment[] }>("/api/v1/field/appointments", { method: "GET" });
   return response.appointments;
+}
+
+export async function getSavedRoute(): Promise<SavedRoute | null> {
+  const response = await requestPlatformJson<{ route: SavedRoute | null }>("/api/v1/field/routes/current", { method: "GET" });
+  return response.route;
+}
+
+export async function addSavedRouteItem(propertyId: string, startingLatitude?: number | null, startingLongitude?: number | null): Promise<SavedRoute> {
+  const response = await requestPlatformJson<{ route: SavedRoute }>("/api/v1/field/routes/items", {
+    method: "POST",
+    body: JSON.stringify({ propertyId, startingLatitude, startingLongitude }),
+  });
+  return response.route;
+}
+
+export async function removeSavedRouteItem(propertyId: string): Promise<SavedRoute | null> {
+  const response = await requestPlatformJson<{ route: SavedRoute | null }>(`/api/v1/field/routes/items/${encodeURIComponent(propertyId)}`, {
+    method: "DELETE",
+  });
+  return response.route;
+}
+
+export async function clearSavedRoute(): Promise<void> {
+  await requestPlatformJson<{ route: null }>("/api/v1/field/routes/clear", { method: "POST" });
 }
 
 export async function getFieldAppointment(id: string): Promise<{ context: FieldLeadContext; appointment: FieldAppointment }> {

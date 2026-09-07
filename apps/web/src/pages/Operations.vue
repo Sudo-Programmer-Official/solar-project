@@ -3,7 +3,8 @@
     <MobileHeader eyebrow="OPERATIONS" title="Field control center" subtitle="Capture, schedule, assign, and close the work from one canonical appointment record.">
     </MobileHeader>
 
-    <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
+    <PageSkeleton v-if="showLoading && !hasLoaded" variant="today" />
+    <section v-else-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
       <p class="field-label text-amber-700">Operations unavailable</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p>
       <button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button>
     </section>
@@ -93,6 +94,8 @@
 import { computed, ref } from "vue";
 import type { RevenueCommandCenter, TodayDashboard } from "@solar/contracts";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { addFieldNote, assignFieldAppointment, createFieldOperationalAppointment, createFieldLead, getAvailableFieldClosers, getCommandCenter, getFieldAppointment, getFieldAppointments, getFieldClosers, getFieldLeads, getFieldOperationalSlotDefinitions, getFieldOperationalSlots, getFieldReport, getTopLeads, updateFieldOperationalSlotDefinition, updateFieldOutcome, uploadFieldBill, type AvailableCloser, type FieldAppointment, type FieldLead, type FieldLeadContext, type FieldReport, type FieldOperationalSlot, type FieldOperationalSlotDefinition } from "../services/api";
 import { useUserStore } from "../stores/user.store";
@@ -120,6 +123,9 @@ const selectedBillFile = ref<File | null>(null);
 const error = ref("");
 const message = ref("");
 const saving = ref(false);
+const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 const leadDraft = ref({ homeownerName: "", phone: "", email: "", addressLine1: "", city: "", state: "", postalCode: "" });
 const outcomes = ["CLOSED", "SAT_NOT_CLOSED", "DID_NOT_SIT", "CREDIT_FAIL", "NO_SHOW", "NOT_QUALIFIED", "FOLLOW_UP", "RESCHEDULED", "CANCELLED"];
 
@@ -130,14 +136,21 @@ const metrics = computed(() => [{ label: "Field leads", value: leads.value.lengt
 useOperationalRefresh(load);
 
 async function load() {
+  if (loading.value) return;
+  loading.value = true;
   error.value = "";
-  const results = await Promise.allSettled([getTopLeads(), getCommandCenter(), getFieldLeads(), getFieldAppointments(), getFieldClosers(), getFieldReport(), getFieldOperationalSlots(), getFieldOperationalSlotDefinitions()]);
-  dashboard.value = resultValue(results[0]); commandCenter.value = resultValue(results[1]);
-  leads.value = resultValue(results[2]) ?? []; appointments.value = resultValue(results[3]) ?? []; closers.value = resultValue(results[4]) ?? []; report.value = resultValue(results[5]);
-  operationalSlots.value = resultValue(results[6]) ?? []; definitions.value = resultValue(results[7]) ?? [];
-  for (const definition of definitions.value) { definitionDraft.value[definition.id] = definition.standardCapacity; policyDraft.value[definition.id] = definition.overflowPolicy; }
-  await refreshAvailableClosers();
-  if (results[2].status === "rejected" && results[3].status === "rejected") error.value = "Unable to load live field data right now.";
+  try {
+    const results = await Promise.allSettled([getTopLeads(), getCommandCenter(), getFieldLeads(), getFieldAppointments(), getFieldClosers(), getFieldReport(), getFieldOperationalSlots(), getFieldOperationalSlotDefinitions()]);
+    dashboard.value = resultValue(results[0]); commandCenter.value = resultValue(results[1]);
+    leads.value = resultValue(results[2]) ?? []; appointments.value = resultValue(results[3]) ?? []; closers.value = resultValue(results[4]) ?? []; report.value = resultValue(results[5]);
+    operationalSlots.value = resultValue(results[6]) ?? []; definitions.value = resultValue(results[7]) ?? [];
+    for (const definition of definitions.value) { definitionDraft.value[definition.id] = definition.standardCapacity; policyDraft.value[definition.id] = definition.overflowPolicy; }
+    await refreshAvailableClosers();
+    if (results[2].status === "rejected" && results[3].status === "rejected") error.value = "Unable to load live field data right now.";
+  } finally {
+    hasLoaded.value = true;
+    loading.value = false;
+  }
 }
 
 async function createLead() { saving.value = true; error.value = ""; try { const lead = await createFieldLead(leadDraft.value); leads.value = [lead, ...leads.value]; selectedLeadId.value = lead.id; selectedSlotId.value = ""; operationalSlots.value = await getFieldOperationalSlots(); message.value = "Lead saved. Choose an operational slot to create its UNASSIGNED appointment."; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create the lead."; } finally { saving.value = false; } }

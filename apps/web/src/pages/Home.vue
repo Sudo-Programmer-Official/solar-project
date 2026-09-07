@@ -6,7 +6,8 @@
       </template>
     </MobileHeader>
 
-    <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
+    <PageSkeleton v-if="showLoading && !hasLoaded" variant="today" />
+    <section v-else-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
       <p class="field-label text-amber-700">Field dashboard unavailable</p>
       <p class="mt-2 text-sm text-amber-900">{{ error }}</p>
       <button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button>
@@ -55,6 +56,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { getFieldAppointments, getFieldFollowUps, getFieldLead, getFieldLeads, type FieldAppointment, type FieldFollowUp, type FieldLead } from "../services/api";
 import { useUserStore } from "../stores/user.store";
@@ -65,6 +68,9 @@ const appointments = ref<FieldAppointment[]>([]);
 const followUps = ref<FieldFollowUp[]>([]);
 const missingBillCount = ref(0);
 const error = ref("");
+const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 const firstName = computed(() => user.displayName.split(" ")[0] || "operator");
 const greeting = computed(() => {
   const hour = new Date().getHours();
@@ -84,16 +90,23 @@ const metrics = computed(() => [
 useOperationalRefresh(load);
 
 async function load() {
+  if (loading.value) return;
+  loading.value = true;
   error.value = "";
-  const [leadResult, appointmentResult, followUpResult] = await Promise.allSettled([getFieldLeads(), getFieldAppointments(), getFieldFollowUps()]);
-  if (leadResult.status === "fulfilled") leads.value = leadResult.value;
-  if (appointmentResult.status === "fulfilled") appointments.value = appointmentResult.value;
-  if (followUpResult.status === "fulfilled") followUps.value = followUpResult.value;
-  if (leadResult.status === "rejected" && appointmentResult.status === "rejected") {
-    error.value = "Unable to load live field data right now.";
-    return;
+  try {
+    const [leadResult, appointmentResult, followUpResult] = await Promise.allSettled([getFieldLeads(), getFieldAppointments(), getFieldFollowUps()]);
+    if (leadResult.status === "fulfilled") leads.value = leadResult.value;
+    if (appointmentResult.status === "fulfilled") appointments.value = appointmentResult.value;
+    if (followUpResult.status === "fulfilled") followUps.value = followUpResult.value;
+    if (leadResult.status === "rejected" && appointmentResult.status === "rejected") {
+      error.value = "Unable to load live field data right now.";
+      return;
+    }
+    const contexts = await Promise.all(leads.value.map((lead) => getFieldLead(lead.id).catch(() => null)));
+    missingBillCount.value = contexts.filter((context) => context?.bills.length === 0).length;
+  } finally {
+    hasLoaded.value = true;
+    loading.value = false;
   }
-  const contexts = await Promise.all(leads.value.map((lead) => getFieldLead(lead.id).catch(() => null)));
-  missingBillCount.value = contexts.filter((context) => context?.bills.length === 0).length;
 }
 </script>

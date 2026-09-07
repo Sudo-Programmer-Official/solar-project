@@ -5,8 +5,10 @@
         <template #action><RouterLink to="/leads" class="touch-target inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">Back</RouterLink></template>
       </MobileHeader>
 
-      <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">LEAD UNAVAILABLE</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
+      <PageSkeleton v-if="showLoading && !context" variant="detail" />
+      <section v-else-if="error && !context" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">LEAD UNAVAILABLE</p><p class="mt-2 text-sm text-slate-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
       <template v-else-if="context">
+        <p v-if="error" class="mb-4 rounded-2xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900" role="alert">{{ error }}</p>
         <section v-if="route.query.appointment === 'booked' && bookedAppointment" class="page-surface mb-4 border-emerald-200 bg-emerald-50 p-5 sm:p-6">
           <div class="flex items-start gap-3"><span class="mt-0.5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-sm font-black text-emerald-700">✓</span><div><p class="field-label text-emerald-700">APPOINTMENT BOOKED</p><h2 class="mt-1 text-xl font-semibold text-slate-950">{{ context.lead.homeownerName }}</h2></div></div>
           <dl class="mt-5 grid gap-3 rounded-2xl bg-white/70 p-4 text-sm sm:grid-cols-2">
@@ -58,8 +60,10 @@
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
 import { addFieldNote, downloadFieldBill, getFieldBillDownloadUrl, getFieldLead, type FieldLeadContext, uploadFieldBill } from "../services/api";
 import { updateFieldNote } from "../services/field-notes";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { useUserStore } from "../stores/user.store";
 
@@ -69,6 +73,8 @@ const user = useUserStore();
 const billInput = ref<HTMLInputElement | null>(null);
 const context = ref<FieldLeadContext | null>(null);
 const error = ref("");
+const loading = ref(false);
+const showLoading = useDelayedLoading(loading);
 const billError = ref("");
 const billFile = ref<File | null>(null);
 const uploadingBill = ref(false);
@@ -86,9 +92,12 @@ useOperationalRefresh(load);
 watch(() => props.id, () => { void load(); });
 
 async function load() {
+  if (loading.value) return;
   error.value = "";
+  loading.value = true;
   try { context.value = await getFieldLead(props.id); }
   catch (caught) { error.value = caught instanceof Error ? caught.message : "Unable to load lead."; }
+  finally { loading.value = false; }
 }
 
 async function saveNote() {

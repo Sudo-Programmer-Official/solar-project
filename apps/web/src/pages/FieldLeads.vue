@@ -3,7 +3,8 @@
     <MobileHeader eyebrow="LEADS" title="Field pipeline" subtitle="The canonical lead list shared by setters, closers, managers, and reports.">
       <template #action><RouterLink v-if="user.can('lead:create')" to="/leads/new" class="touch-target inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-xl bg-primary-500 px-4 py-2.5 text-sm font-semibold leading-5 text-white shadow-sm transition hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-200">+ New lead</RouterLink></template>
     </MobileHeader>
-    <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">Leads unavailable</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
+    <PageSkeleton v-if="showLoading && !hasLoaded" variant="rows" />
+    <section v-else-if="error" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">Leads unavailable</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
     <section v-else class="page-surface p-4">
       <div class="flex items-center justify-between gap-3"><div><p class="field-label">VISIBLE PIPELINE</p><h2 class="mt-1 text-lg font-semibold text-slate-900">{{ leads.length }} lead{{ leads.length === 1 ? "" : "s" }}</h2></div><button class="rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600" type="button" @click="load">Refresh</button></div>
       <div v-if="leads.length === 0" class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"><p class="text-sm text-slate-500">No leads yet.</p><RouterLink v-if="user.can('lead:create')" to="/leads/new" class="inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-xl bg-primary-500 px-4 py-2.5 text-sm font-semibold leading-5 text-white shadow-sm transition hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-200">+ New lead</RouterLink></div>
@@ -17,6 +18,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { getFieldLeads, type FieldLead } from "../services/api";
 import { useUserStore } from "../stores/user.store";
@@ -24,8 +27,18 @@ import { useUserStore } from "../stores/user.store";
 const user = useUserStore();
 const leads = ref<FieldLead[]>([]);
 const error = ref("");
+const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 useOperationalRefresh(load);
-async function load() { error.value = ""; try { leads.value = await getFieldLeads(); } catch (caught) { error.value = caught instanceof Error ? caught.message : "Unable to load leads."; } }
+async function load() {
+  if (loading.value) return;
+  loading.value = true;
+  error.value = "";
+  try { leads.value = await getFieldLeads(); }
+  catch (caught) { error.value = caught instanceof Error ? caught.message : "Unable to load leads."; }
+  finally { hasLoaded.value = true; loading.value = false; }
+}
 function addressLabel(lead: FieldLead) { return [lead.addressLine1, lead.city, lead.state, lead.postalCode].filter(Boolean).join(", "); }
 function formatDate(value: string) { return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
 </script>

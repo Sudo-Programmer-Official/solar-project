@@ -66,6 +66,23 @@
   }
 }
 
+@keyframes route-progress {
+  0% { transform: translateX(-140%); }
+  50% { transform: translateX(120%); }
+  100% { transform: translateX(330%); }
+}
+
+.route-progress-bar {
+  animation: route-progress 900ms ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-progress-bar,
+  .animate-pulse {
+    animation: none;
+  }
+}
+
 @layer components {
   .app-shell {
     @apply mx-auto flex min-h-screen w-full max-w-7xl flex-col pb-24;

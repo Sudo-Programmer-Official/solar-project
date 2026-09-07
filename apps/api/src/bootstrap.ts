@@ -48,6 +48,8 @@ const expectedPlatformTables = [
   "operational_slots",
   "appointments",
   "follow_ups",
+  "routes",
+  "route_items",
   "notes",
   "bill_attachments",
   "activities",

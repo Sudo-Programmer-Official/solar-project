@@ -6,7 +6,7 @@
   <router-view v-else-if="isInviteRoute" />
   <ChangePassword v-else-if="user.mustChangePassword" />
   <div v-else class="app-shell">
-    <header class="flex min-h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#050816] px-4 pb-2 pt-[env(safe-area-inset-top)] text-white sm:px-6">
+    <header class="relative flex min-h-16 items-center justify-between gap-3 border-b border-white/10 bg-[#050816] px-4 pb-2 pt-[env(safe-area-inset-top)] text-white sm:px-6">
       <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
         <BlackOpsMark size="sm" inverted />
         <div class="min-w-0">
@@ -33,6 +33,9 @@
           </svg>
         </button>
       </div>
+      <div v-if="routePending" class="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-white/10" aria-label="Loading page" role="progressbar">
+        <span class="route-progress-bar block h-full w-1/3 bg-cyan-400" />
+      </div>
     </header>
     <div :inert="mobileNavigationOpen">
       <div class="lg:grid" :class="shellPreferences.sidebarCollapsed ? 'lg:grid-cols-[76px_minmax(0,1fr)]' : 'lg:grid-cols-[240px_minmax(0,1fr)]'">
@@ -45,6 +48,24 @@
         <div class="min-w-0">
           <div v-if="isLabsRoute && user.hasModule('LABS')" class="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
             <GlobalSearchBar />
+            <nav class="mx-auto flex max-w-6xl gap-2 overflow-x-auto px-3 pb-2 md:px-4" aria-label="Labs navigation">
+              <RouterLink
+                v-if="user.hasModule('LEAD_FINDER')"
+                to="/labs/lead-finder"
+                class="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                :class="route.path.startsWith('/labs/lead-finder') ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'"
+              >
+                Lead Finder
+              </RouterLink>
+              <RouterLink
+                v-if="user.hasModule('ROUTE_EXPERIMENT')"
+                to="/labs/route"
+                class="shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                :class="route.path.startsWith('/labs/route') ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'"
+              >
+                Route<span v-if="hunt.savedRouteCount > 0"> ({{ hunt.savedRouteCount }})</span>
+              </RouterLink>
+            </nav>
           </div>
           <div v-if="isLabsRoute && user.hasModule('LABS') && showScanProgress && !isLeadScanningRoute" class="border-b border-slate-200 bg-white">
             <div class="mx-auto max-w-6xl px-4 pt-3">
@@ -67,6 +88,7 @@
       </div>
       <BottomNavigation />
     </div>
+    <FeedbackToast />
 
     <Transition name="shell-backdrop">
       <button
@@ -100,6 +122,7 @@ import { PlatformRole } from "@solar/contracts";
 import BottomNavigation from "./components/BottomNavigation.vue";
 import BlackOpsMark from "./components/BlackOpsMark.vue";
 import DesktopNavigation from "./components/DesktopNavigation.vue";
+import FeedbackToast from "./components/FeedbackToast.vue";
 import GlobalSearchBar from "./components/GlobalSearchBar.vue";
 import ScanProgressPanel from "./components/ScanProgressPanel.vue";
 import Login from "./pages/Login.vue";
@@ -126,6 +149,8 @@ const mobileNavigationOpen = ref(false);
 const hamburgerRef = ref<HTMLButtonElement | null>(null);
 const mobileNavigationRef = ref<HTMLElement | null>(null);
 const previousBodyOverflow = ref("");
+const routePending = ref(false);
+let routeProgressTimer: ReturnType<typeof setTimeout> | undefined;
 
 if (route.path === "/invite") {
   user.isHydrating = false;
@@ -133,12 +158,36 @@ if (route.path === "/invite") {
   void user.hydrate();
 }
 
+router.beforeEach(() => {
+  if (routeProgressTimer !== undefined) clearTimeout(routeProgressTimer);
+  routePending.value = true;
+});
+
+router.afterEach(() => {
+  if (routeProgressTimer !== undefined) clearTimeout(routeProgressTimer);
+  routeProgressTimer = setTimeout(() => {
+    routePending.value = false;
+    routeProgressTimer = undefined;
+  }, 120);
+});
+
+router.onError(() => {
+  if (routeProgressTimer !== undefined) clearTimeout(routeProgressTimer);
+  routePending.value = false;
+  routeProgressTimer = undefined;
+});
+
 watch([() => user.isHydrating, () => user.isAuthenticated], ([hydrating, authenticated]) => {
   if (hydrating || !authenticated || isInviteRoute.value) return;
   if (route.path === "/" || (route.meta.module && !user.hasModule(route.meta.module))) {
     void router.replace(user.primaryLandingPath);
   }
 });
+
+watch([() => user.isHydrating, () => user.isAuthenticated, () => user.modules], ([hydrating, authenticated]) => {
+  if (hydrating || !authenticated || !user.hasModule("LEAD_FINDER")) return;
+  void hunt.loadSavedRoute();
+}, { immediate: true });
 
 watch(mobileNavigationOpen, async (isOpen) => {
   if (isOpen) {
@@ -168,6 +217,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", handleShellKeydown);
   window.removeEventListener("resize", closeDrawerOnDesktopResize);
   document.body.style.overflow = previousBodyOverflow.value;
+  if (routeProgressTimer !== undefined) clearTimeout(routeProgressTimer);
 });
 
 function openMobileNavigation(): void {

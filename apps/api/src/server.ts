@@ -65,7 +65,7 @@ import type { FieldBillStorage } from "./field-bill-storage";
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
-  "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type",
 };
 
@@ -991,6 +991,33 @@ async function handleFieldRoute(
       ...corsHeaders,
     });
     res.end(downloaded.content);
+    return;
+  }
+
+  if (req.method === "GET" && path === "/api/v1/field/routes/current") {
+    sendJson(res, 200, { route: await service.getSavedRoute(user) }, corsHeaders);
+    return;
+  }
+  if (req.method === "POST" && path === "/api/v1/field/routes/items") {
+    const body = await readJson(req);
+    const route = await service.addSavedRouteItem(
+      user,
+      requiredString(body?.propertyId, "propertyId"),
+      optionalNumber(body?.startingLatitude),
+      optionalNumber(body?.startingLongitude),
+    );
+    sendJson(res, 200, { route }, corsHeaders);
+    return;
+  }
+  const savedRouteItemMatch = path.match(/^\/api\/v1\/field\/routes\/items\/([^/]+)$/);
+  if (savedRouteItemMatch?.[1] && req.method === "DELETE") {
+    const route = await service.removeSavedRouteItem(user, decodeURIComponent(savedRouteItemMatch[1]));
+    sendJson(res, 200, { route }, corsHeaders);
+    return;
+  }
+  if (req.method === "POST" && path === "/api/v1/field/routes/clear") {
+    await service.clearSavedRoute(user);
+    sendJson(res, 200, { route: null }, corsHeaders);
     return;
   }
 

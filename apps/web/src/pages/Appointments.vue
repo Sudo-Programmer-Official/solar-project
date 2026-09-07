@@ -9,7 +9,8 @@
       </template>
     </MobileHeader>
 
-    <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
+    <PageSkeleton v-if="showLoading && !hasLoaded" variant="table" />
+    <section v-else-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
       <p class="field-label text-amber-700">Appointments unavailable</p>
       <p class="mt-2 text-sm text-amber-900">{{ error }}</p>
       <button class="touch-target mt-4 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button>
@@ -161,9 +162,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import OperationalSlotPicker from "../components/OperationalSlotPicker.vue";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { addFieldNote, assignFieldAppointment, cancelFieldAppointment, downloadFieldBill, getAvailableFieldClosers, getFieldAppointment, getFieldAppointments, getFieldBillDownloadUrl, getFieldClosers, getFieldLeads, getFieldOperationalSlots, rescheduleFieldAppointment, updateFieldOutcome, type AvailableCloser, type FieldAppointment, type FieldLead, type FieldLeadContext, type FieldOperationalSlot } from "../services/api";
+import { useFeedbackStore } from "../stores/feedback.store";
 import { useUserStore } from "../stores/user.store";
 
 type ManagerStatusFilter = "PRIORITY" | "NEEDS_REVIEW" | "UNASSIGNED" | "ASSIGNED" | "COMPLETED" | "CANCELLED" | "ALL" | "ACTIVE";
@@ -171,6 +175,7 @@ type DateFilter = "TODAY" | "UPCOMING" | "ALL";
 type TimeFilter = "ALL" | "MORNING" | "AFTERNOON" | "EVENING";
 
 const user = useUserStore();
+const feedback = useFeedbackStore();
 const appointments = ref<FieldAppointment[]>([]);
 const leads = ref<FieldLead[]>([]);
 const operationalSlots = ref<FieldOperationalSlot[]>([]);
@@ -196,6 +201,9 @@ const closerFilter = ref("ALL");
 const setterFilter = ref("ALL");
 const timeFilter = ref<TimeFilter>("ALL");
 const error = ref("");
+const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 const outcomes = ["CLOSED", "SAT_NOT_CLOSED", "DID_NOT_SIT", "CREDIT_FAIL", "NO_SHOW", "NOT_QUALIFIED", "FOLLOW_UP", "RESCHEDULED", "CANCELLED"] as const;
 const isManagerBoard = computed(() => user.can("appointment:assign") || user.can("appointment:reassign"));
 
@@ -227,22 +235,29 @@ const visibleAppointments = computed(() => appointments.value.filter((appointmen
 useOperationalRefresh(load);
 
 async function load() {
+  if (loading.value) return;
+  loading.value = true;
   error.value = "";
   assignmentNotice.value = "";
-  const results = await Promise.allSettled([
-    getFieldAppointments(),
-    getFieldLeads(),
-    getFieldOperationalSlots(),
-    isManagerBoard.value ? getFieldClosers() : Promise.resolve([]),
-  ]);
-  const [appointmentResult, leadResult, slotResult, closerResult] = results;
-  if (appointmentResult.status === "fulfilled") appointments.value = appointmentResult.value;
-  if (leadResult.status === "fulfilled") leads.value = leadResult.value;
-  if (slotResult.status === "fulfilled") operationalSlots.value = slotResult.value;
-  if (closerResult.status === "fulfilled") closers.value = closerResult.value;
-  if (appointmentResult.status === "rejected") error.value = "The appointment queue could not be loaded.";
-  availableClosers.value = {};
-  if (appointmentResult.status === "fulfilled" && isManagerBoard.value) await refreshAvailableClosers(appointmentResult.value.filter(isAssignmentRow));
+  try {
+    const results = await Promise.allSettled([
+      getFieldAppointments(),
+      getFieldLeads(),
+      getFieldOperationalSlots(),
+      isManagerBoard.value ? getFieldClosers() : Promise.resolve([]),
+    ]);
+    const [appointmentResult, leadResult, slotResult, closerResult] = results;
+    if (appointmentResult.status === "fulfilled") appointments.value = appointmentResult.value;
+    if (leadResult.status === "fulfilled") leads.value = leadResult.value;
+    if (slotResult.status === "fulfilled") operationalSlots.value = slotResult.value;
+    if (closerResult.status === "fulfilled") closers.value = closerResult.value;
+    if (appointmentResult.status === "rejected") error.value = "The appointment queue could not be loaded.";
+    availableClosers.value = {};
+    if (appointmentResult.status === "fulfilled" && isManagerBoard.value) await refreshAvailableClosers(appointmentResult.value.filter(isAssignmentRow));
+  } finally {
+    hasLoaded.value = true;
+    loading.value = false;
+  }
 }
 
 async function refreshAvailableClosers(items: FieldAppointment[]) {
@@ -270,11 +285,13 @@ async function assign(appointment: FieldAppointment) {
     replaceAppointment(updated);
     assignmentDraft.value[appointment.id] = "";
     assignmentMessage.value[appointment.id] = `Assigned to ${updated.closerName ?? closerOptions.value.find((item) => item.id === closerId)?.displayName ?? "closer"} ✓`;
+    feedback.success(assignmentMessage.value[appointment.id]);
     assignmentNotice.value = assignmentMessage.value[appointment.id];
     await ensureAvailableClosers(updated);
     if (selectedContext.value?.appointment.id === updated.id) selectedContext.value = await getFieldAppointment(updated.id).catch(() => selectedContext.value);
   } catch (caught) {
     assignmentError.value[appointment.id] = caught instanceof Error ? caught.message : "Unable to assign the closer. Choose another eligible closer.";
+    feedback.failure(assignmentError.value[appointment.id]);
   } finally {
     assigning.value[appointment.id] = false;
   }

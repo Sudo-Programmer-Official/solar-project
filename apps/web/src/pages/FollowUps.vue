@@ -4,7 +4,7 @@
       <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div><p class="field-label text-primary-700">FOLLOW-UPS</p><h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Follow-ups</h1></div>
         <div class="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-          <button class="min-h-touch rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700" type="button" @click="load">Refresh</button>
+          <button class="min-h-touch rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-50" :disabled="loading" type="button" @click="load">{{ loading ? "Refreshing…" : "Refresh" }}</button>
           <button class="min-h-touch rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm" type="button" @click="showCreate = !showCreate">{{ showCreate ? "Close form" : "+ New follow-up" }}</button>
         </div>
       </div>
@@ -15,8 +15,10 @@
       </div>
     </section>
 
-    <section v-if="error" class="page-surface mt-4 border-amber-200 bg-amber-50 p-4"><p class="field-label text-amber-700">FOLLOW-UPS UNAVAILABLE</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p></section>
+    <PageSkeleton v-if="showLoading && !hasLoaded" class="mt-4" variant="table" />
+    <section v-else-if="error" class="page-surface mt-4 border-amber-200 bg-amber-50 p-4"><p class="field-label text-amber-700">FOLLOW-UPS UNAVAILABLE</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
 
+    <template v-else>
     <section v-if="showCreate" class="page-surface mt-4 p-4 sm:p-5">
       <p class="field-label text-primary-600">NEW PRE-LEAD</p><h2 class="mt-1 text-xl font-semibold text-slate-950">Save a doorstep conversation</h2><p class="mt-2 text-sm text-slate-500">Name, phone, and email are optional. The address, schedule, reason, and context note are enough to save it.</p>
       <form class="mt-5 grid gap-3 sm:grid-cols-2" @submit.prevent="create">
@@ -85,13 +87,17 @@
         </article>
       </div>
     </section>
+    </template>
   </main>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { addFieldFollowUpNote, completeFieldFollowUp, convertFieldFollowUpToLead, createFieldFollowUp, getFieldFollowUps, rescheduleFieldFollowUp, type FieldFollowUp, type FieldFollowUpActivity } from "../services/api";
+import { useFeedbackStore } from "../stores/feedback.store";
 
 type ViewId = "overdue" | "today" | "upcoming" | "completed";
 type Daypart = "MORNING" | "AFTERNOON" | "EVENING";
@@ -101,8 +107,12 @@ type ActivityEvent = { body?: unknown; dueAt?: unknown; dueDaypart?: unknown; le
 
 const reasons = ["Need bill", "New roof", "Spouse/decision maker", "Call back", "Not home", "Thinking about it", "Credit timing", "Future interest", "Other"];
 const dayparts: Array<{ value: Daypart; label: string }> = [{ value: "MORNING", label: "Morning" }, { value: "AFTERNOON", label: "Afternoon" }, { value: "EVENING", label: "Evening" }];
+const feedback = useFeedbackStore();
 const followUps = ref<FieldFollowUp[]>([]);
 const error = ref("");
+const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 const saving = ref(false);
 const showCreate = ref(false);
 const activeView = ref<ViewId>("today");
@@ -135,7 +145,14 @@ const visibleViewItems = computed(() => {
 
 useOperationalRefresh(load);
 
-async function load() { error.value = ""; try { followUps.value = await getFieldFollowUps(); if (overdueItems.value.length > 0) activeView.value = "overdue"; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to load follow-ups."; } }
+async function load() {
+  if (loading.value) return;
+  loading.value = true;
+  error.value = "";
+  try { followUps.value = await getFieldFollowUps(); if (overdueItems.value.length > 0) activeView.value = "overdue"; }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to load follow-ups."; }
+  finally { hasLoaded.value = true; loading.value = false; }
+}
 async function create() {
   const reason = draft.value.reason === "Other" ? draft.value.otherReason.trim() : draft.value.reason;
   if (!draft.value.addressLine1.trim() || !draft.value.date || !reason || !draft.value.note.trim() || (!draft.value.time && !draft.value.daypart)) return;
@@ -143,13 +160,14 @@ async function create() {
   try {
     const created = await createFieldFollowUp({ homeownerName: draft.value.homeownerName.trim() || null, phone: draft.value.phone.trim() || null, email: draft.value.email.trim() || null, addressLine1: draft.value.addressLine1.trim(), city: draft.value.city.trim() || null, state: draft.value.state.trim() || null, postalCode: draft.value.postalCode.trim() || null, dueAt: scheduleIso(draft.value.date, draft.value.time), dueDaypart: draft.value.time ? null : draft.value.daypart, reason, note: draft.value.note.trim() });
     followUps.value = [created, ...followUps.value]; activeView.value = bucket(created) === "overdue" ? "overdue" : bucket(created) === "today" ? "today" : "upcoming"; draft.value = { homeownerName: "", phone: "", email: "", addressLine1: "", city: "", state: "", postalCode: "", date: todayInput(), time: "", daypart: "AFTERNOON", reason: "", otherReason: "", note: "" }; showCreate.value = false;
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create follow-up."; } finally { saving.value = false; }
+    feedback.success("Follow-up saved.");
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create follow-up."; feedback.failure(error.value); } finally { saving.value = false; }
 }
-async function complete(followUp: FieldFollowUp) { await runAction(() => completeFieldFollowUp(followUp.id), "Unable to complete follow-up."); }
-async function reschedule(followUp: FieldFollowUp) { const value = rescheduleDraft.value[followUp.id]; if (!value?.date || (!value.time && !value.daypart)) return; await runAction(() => rescheduleFieldFollowUp(followUp.id, { dueAt: scheduleIso(value.date, value.time), dueDaypart: value.time ? null : value.daypart }), "Unable to reschedule follow-up."); rescheduleOpen.value[followUp.id] = false; }
-async function addNote(followUp: FieldFollowUp) { const body = noteDraft.value[followUp.id]?.trim(); if (!body) return; await runAction(() => addFieldFollowUpNote(followUp.id, body), "Unable to add note."); noteDraft.value[followUp.id] = ""; noteOpen.value[followUp.id] = false; }
-async function convert(followUp: FieldFollowUp) { if (followUp.convertedLeadId) return; converting.value[followUp.id] = true; error.value = ""; try { const result = await convertFieldFollowUpToLead(followUp.id); replace(result.followUp); activeView.value = "completed"; } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create lead from follow-up."; } finally { converting.value[followUp.id] = false; } }
-async function runAction(action: () => Promise<FieldFollowUp>, fallback: string) { saving.value = true; error.value = ""; try { replace(await action()); } catch (cause) { error.value = cause instanceof Error ? cause.message : fallback; } finally { saving.value = false; } }
+async function complete(followUp: FieldFollowUp) { await runAction(() => completeFieldFollowUp(followUp.id), "Unable to complete follow-up.", "Follow-up completed."); }
+async function reschedule(followUp: FieldFollowUp) { const value = rescheduleDraft.value[followUp.id]; if (!value?.date || (!value.time && !value.daypart)) return; await runAction(() => rescheduleFieldFollowUp(followUp.id, { dueAt: scheduleIso(value.date, value.time), dueDaypart: value.time ? null : value.daypart }), "Unable to reschedule follow-up.", "Follow-up rescheduled."); rescheduleOpen.value[followUp.id] = false; }
+async function addNote(followUp: FieldFollowUp) { const body = noteDraft.value[followUp.id]?.trim(); if (!body) return; await runAction(() => addFieldFollowUpNote(followUp.id, body), "Unable to add note.", "Activity note added."); noteDraft.value[followUp.id] = ""; noteOpen.value[followUp.id] = false; }
+async function convert(followUp: FieldFollowUp) { if (followUp.convertedLeadId) return; converting.value[followUp.id] = true; error.value = ""; try { const result = await convertFieldFollowUpToLead(followUp.id); replace(result.followUp); activeView.value = "completed"; feedback.success("Follow-up converted into a lead."); } catch (cause) { error.value = cause instanceof Error ? cause.message : "Unable to create lead from follow-up."; feedback.failure(error.value); } finally { converting.value[followUp.id] = false; } }
+async function runAction(action: () => Promise<FieldFollowUp>, fallback: string, successMessage: string) { saving.value = true; error.value = ""; try { replace(await action()); feedback.success(successMessage); } catch (cause) { error.value = cause instanceof Error ? cause.message : fallback; feedback.failure(error.value); } finally { saving.value = false; } }
 function toggleDetails(followUp: FieldFollowUp) { expandedRows.value[followUp.id] = !expandedRows.value[followUp.id]; }
 function toggleReschedule(followUp: FieldFollowUp) { rescheduleOpen.value[followUp.id] = !rescheduleOpen.value[followUp.id]; if (rescheduleOpen.value[followUp.id]) { expandedRows.value[followUp.id] = true; const due = followUp.dueAt ? new Date(followUp.dueAt) : new Date(); rescheduleDraft.value[followUp.id] = { date: localDateInput(due), time: followUp.dueDaypart ? "" : localTimeInput(due), daypart: followUp.dueDaypart ?? "AFTERNOON" }; } }
 function toggleNote(followUp: FieldFollowUp) { noteOpen.value[followUp.id] = !noteOpen.value[followUp.id]; if (noteOpen.value[followUp.id]) expandedRows.value[followUp.id] = true; }

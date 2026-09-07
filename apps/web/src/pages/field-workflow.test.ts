@@ -103,6 +103,45 @@ test("manager Today is a canonical six-slot command dashboard", async () => {
   assert.doesNotMatch(source, /WhaleHunterWorkspace/);
 });
 
+test("field routes provide immediate progress, delayed skeletons, and retry feedback", async () => {
+  const appSource = await readFile(new URL("../App.vue", import.meta.url), "utf8");
+  const skeletonSource = await readFile(new URL("../components/PageSkeleton.vue", import.meta.url), "utf8");
+  const delayedLoadingSource = await readFile(new URL("../composables/useDelayedLoading.ts", import.meta.url), "utf8");
+  const appointmentsSource = await readFile(new URL("./Appointments.vue", import.meta.url), "utf8");
+  const scheduleSource = await readFile(new URL("./Schedule.vue", import.meta.url), "utf8");
+  const followUpsSource = await readFile(new URL("./FollowUps.vue", import.meta.url), "utf8");
+
+  assert.match(appSource, /role="progressbar"/);
+  assert.match(appSource, /router\.beforeEach/);
+  assert.match(appSource, /router\.afterEach/);
+  assert.match(appSource, /router\.onError/);
+  assert.match(skeletonSource, /variant === 'today'/);
+  assert.match(skeletonSource, /variant === 'slots'/);
+  assert.match(skeletonSource, /variant === 'team'/);
+  assert.match(skeletonSource, /variant === 'detail'/);
+  assert.match(delayedLoadingSource, /setTimeout/);
+  assert.match(appointmentsSource, /PageSkeleton/);
+  assert.match(appointmentsSource, /Assigning…/);
+  assert.match(scheduleSource, /variant="slots"/);
+  assert.match(followUpsSource, /variant="table"/);
+  assert.match(followUpsSource, /Creating lead…/);
+});
+
+test("mutations expose shared success and error feedback", async () => {
+  const toastSource = await readFile(new URL("../components/FeedbackToast.vue", import.meta.url), "utf8");
+  const storeSource = await readFile(new URL("../stores/feedback.store.ts", import.meta.url), "utf8");
+  const followUpsSource = await readFile(new URL("./FollowUps.vue", import.meta.url), "utf8");
+  const teamSource = await readFile(new URL("./Team.vue", import.meta.url), "utf8");
+
+  assert.match(toastSource, /aria-live="polite"/);
+  assert.match(toastSource, /safe-area-inset-bottom/);
+  assert.match(storeSource, /setTimeout/);
+  assert.match(followUpsSource, /feedback\.success/);
+  assert.match(followUpsSource, /feedback\.failure/);
+  assert.match(teamSource, /pendingMemberAction/);
+  assert.match(teamSource, /Saving…/);
+});
+
 test("lead detail exposes audited note edits and canonical activity", async () => {
   const source = await readFile(new URL("./LeadDetail.vue", import.meta.url), "utf8");
 
@@ -170,6 +209,32 @@ test("follow-ups page keeps the mobile workspace focused", async () => {
   assert.doesNotMatch(source, /Reconnect when they are ready/);
   assert.doesNotMatch(source, /Keep early homeowner conversations out of the lead pipeline/);
   assert.match(source, /<h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Follow-ups<\/h1>/);
+});
+
+test("Labs route workspace persists selections and stays discoverable", async () => {
+  const routeSource = await readFile(new URL("./Route.vue", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../App.vue", import.meta.url), "utf8");
+  const huntSource = await readFile(new URL("../stores/hunt.store.ts", import.meta.url), "utf8");
+  const apiSource = await readFile(new URL("../services/api.ts", import.meta.url), "utf8");
+  const migrationSource = await readFile(new URL("../../../../packages/database/migrations/019_saved_routes.sql", import.meta.url), "utf8");
+  const routerSource = await readFile(new URL("../router/index.ts", import.meta.url), "utf8");
+
+  assert.match(routerSource, /path: "\/labs\/route", name: "route-experiment", component: \(\) => import\("\.\.\/pages\/Route\.vue"\)/);
+  assert.match(routeSource, /Start route/);
+  assert.match(routeSource, /Clear route/);
+  assert.match(routeSource, /PropertyDetailDrawer/);
+  assert.match(routeSource, /hidden overflow-x-auto md:block/);
+  assert.match(routeSource, /grid gap-3 p-3 md:hidden/);
+  assert.match(routeSource, /Navigate/);
+  assert.match(routeSource, /Remove/);
+  assert.match(appSource, /aria-label="Labs navigation"/);
+  assert.match(appSource, /Route<span v-if="hunt\.savedRouteCount > 0">/);
+  assert.match(huntSource, /addSavedRouteItem/);
+  assert.match(huntSource, /removeSavedRouteItem/);
+  assert.match(huntSource, /loadSavedRoute/);
+  assert.match(apiSource, /\/api\/v1\/field\/routes\/current/);
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS field_ops\.route_items/);
+  assert.match(migrationSource, /UNIQUE \(route_id, property_id\)/);
 });
 
 test("Vercel uses a same-origin API proxy for mobile session cookies", async () => {

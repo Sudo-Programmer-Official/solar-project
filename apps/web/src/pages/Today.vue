@@ -7,6 +7,8 @@
         </template>
       </MobileHeader>
 
+      <PageSkeleton v-if="showLoading && !hasLoaded" variant="today" />
+      <template v-else>
       <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5" role="alert">
         <p class="field-label text-amber-700">TODAY PARTIALLY UNAVAILABLE</p>
         <p class="mt-2 text-sm text-amber-900">{{ error }}</p>
@@ -125,6 +127,7 @@
           <RouterLink v-for="item in followUpSummary" :key="item.label" to="/follow-ups" class="rounded-2xl bg-slate-50 p-3 transition hover:bg-primary-50"><p class="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">{{ item.label }}</p><strong class="mt-1 block text-xl text-slate-950">{{ item.value }}</strong></RouterLink>
         </div>
       </section>
+      </template>
     </div>
   </main>
 </template>
@@ -132,8 +135,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { assignFieldAppointment, getAvailableFieldClosers, getFieldAppointments, getFieldFollowUps, getFieldOperationalSlots, getTeamMembers, type AvailableCloser, type FieldAppointment, type FieldFollowUp, type FieldOperationalSlot, type TeamMember } from "../services/api";
+import { useFeedbackStore } from "../stores/feedback.store";
 import { useUserStore } from "../stores/user.store";
 import { formatOperationalTime, localDayWindow, oneSlotPerDateAndTime } from "../utils/operational-slots";
 
@@ -149,6 +155,7 @@ type SlotSummary = {
 
 const FIXED_TIMES = ["10:00", "12:00", "14:00", "16:00", "18:00", "20:00"];
 const user = useUserStore();
+const feedback = useFeedbackStore();
 const appointments = ref<FieldAppointment[]>([]);
 const operationalSlots = ref<FieldOperationalSlot[]>([]);
 const followUps = ref<FieldFollowUp[]>([]);
@@ -160,6 +167,8 @@ const assignmentError = ref<Record<string, string>>({});
 const assignmentMessage = ref<Record<string, string>>({});
 const error = ref("");
 const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 
 const canAssign = computed(() => user.can("appointment:assign"));
 const todayDateKey = computed(() => localDateKey(new Date()));
@@ -220,15 +229,19 @@ async function load(): Promise<void> {
   if (loading.value) return;
   loading.value = true;
   error.value = "";
-  const { from, to } = localDayWindow();
-  const results = await Promise.allSettled([getFieldAppointments(), getFieldOperationalSlots(from, to), getFieldFollowUps(), getTeamMembers()]);
-  if (results[0].status === "fulfilled") appointments.value = results[0].value;
-  if (results[1].status === "fulfilled") operationalSlots.value = results[1].value;
-  if (results[2].status === "fulfilled") followUps.value = results[2].value;
-  if (results[3].status === "fulfilled") teamMembers.value = results[3].value;
-  if (results[0].status === "rejected") error.value = "Today’s appointment data could not be loaded.";
-  if (results.every((result) => result.status === "rejected")) error.value = "Today’s command data could not be loaded.";
-  loading.value = false;
+  try {
+    const { from, to } = localDayWindow();
+    const results = await Promise.allSettled([getFieldAppointments(), getFieldOperationalSlots(from, to), getFieldFollowUps(), getTeamMembers()]);
+    if (results[0].status === "fulfilled") appointments.value = results[0].value;
+    if (results[1].status === "fulfilled") operationalSlots.value = results[1].value;
+    if (results[2].status === "fulfilled") followUps.value = results[2].value;
+    if (results[3].status === "fulfilled") teamMembers.value = results[3].value;
+    if (results[0].status === "rejected") error.value = "Today’s appointment data could not be loaded.";
+    if (results.every((result) => result.status === "rejected")) error.value = "Today’s command data could not be loaded.";
+  } finally {
+    hasLoaded.value = true;
+    loading.value = false;
+  }
 }
 
 async function ensureAvailableClosers(appointment: FieldAppointment): Promise<void> {
@@ -247,11 +260,13 @@ async function assign(appointment: FieldAppointment): Promise<void> {
     replaceAppointment(updated);
     assignmentDraft.value[appointment.id] = "";
     assignmentMessage.value[appointment.id] = `Assigned to ${updated.closerName ?? availableClosers.value[appointment.id]?.find((closer) => closer.id === closerId)?.displayName ?? "closer"} ✓`;
+    feedback.success(assignmentMessage.value[appointment.id]);
     availableClosers.value[appointment.id] = await getAvailableFieldClosers(appointment.id).catch(() => availableClosers.value[appointment.id] ?? []);
     const window = localDayWindow();
     operationalSlots.value = await getFieldOperationalSlots(window.from, window.to).catch(() => operationalSlots.value);
   } catch (cause) {
     assignmentError.value[appointment.id] = cause instanceof Error ? cause.message : "Unable to assign the closer. Choose another AVAILABLE closer.";
+    feedback.failure(assignmentError.value[appointment.id]);
   } finally {
     assigning.value[appointment.id] = false;
   }

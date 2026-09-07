@@ -5,7 +5,8 @@
         <template #action><button class="touch-target rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600" type="button" @click="load">Refresh</button></template>
       </MobileHeader>
 
-      <section v-if="error" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">SCHEDULE UNAVAILABLE</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
+      <PageSkeleton v-if="showLoading && !hasLoaded" variant="slots" />
+      <section v-else-if="error" class="page-surface border-amber-200 bg-amber-50 p-5"><p class="field-label text-amber-700">SCHEDULE UNAVAILABLE</p><p class="mt-2 text-sm text-amber-900">{{ error }}</p><button class="touch-target mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white" type="button" @click="load">Try again</button></section>
       <section v-else class="page-surface p-4 sm:p-5">
         <div class="flex items-start justify-between gap-3"><div><p class="field-label">TODAY'S AGENDA</p><h2 class="mt-1 text-xl font-semibold text-slate-950">{{ todayLabel }}</h2></div><span class="rounded-full bg-primary-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] text-primary-700">6 fixed times</span></div>
         <div v-if="todaySlots.length === 0" class="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No operational times are available today.</div>
@@ -26,6 +27,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
+import { useDelayedLoading } from "../composables/useDelayedLoading";
 import { useOperationalRefresh } from "../composables/useOperationalRefresh";
 import { getFieldAppointments, getFieldLeads, getFieldOperationalSlots, type FieldAppointment, type FieldLead, type FieldOperationalSlot } from "../services/api";
 import { formatOperationalTime, localDayWindow, oneSlotPerDateAndTime, operationalSlotStateLabel } from "../utils/operational-slots";
@@ -34,6 +37,9 @@ const slots = ref<FieldOperationalSlot[]>([]);
 const appointments = ref<FieldAppointment[]>([]);
 const leads = ref<FieldLead[]>([]);
 const error = ref("");
+const loading = ref(false);
+const hasLoaded = ref(false);
+const showLoading = useDelayedLoading(loading);
 const todayLabel = computed(() => new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }));
 const todaySlots = computed(() => oneSlotPerDateAndTime(slots.value).sort((a, b) => a.startTime.localeCompare(b.startTime)));
 const leadsById = computed(() => new Map(leads.value.map((lead) => [lead.id, lead])));
@@ -41,13 +47,20 @@ const leadsById = computed(() => new Map(leads.value.map((lead) => [lead.id, lea
 useOperationalRefresh(load);
 
 async function load() {
+  if (loading.value) return;
   error.value = "";
-  const { from, to } = localDayWindow();
-  const results = await Promise.allSettled([getFieldOperationalSlots(from, to), getFieldAppointments(), getFieldLeads()]);
-  if (results[0].status === "fulfilled") slots.value = results[0].value;
-  if (results[1].status === "fulfilled") appointments.value = results[1].value;
-  if (results[2].status === "fulfilled") leads.value = results[2].value;
-  if (results.every((result) => result.status === "rejected")) error.value = "The schedule API could not be reached.";
+  loading.value = true;
+  try {
+    const { from, to } = localDayWindow();
+    const results = await Promise.allSettled([getFieldOperationalSlots(from, to), getFieldAppointments(), getFieldLeads()]);
+    if (results[0].status === "fulfilled") slots.value = results[0].value;
+    if (results[1].status === "fulfilled") appointments.value = results[1].value;
+    if (results[2].status === "fulfilled") leads.value = results[2].value;
+    if (results.every((result) => result.status === "rejected")) error.value = "The schedule API could not be reached.";
+  } finally {
+    hasLoaded.value = true;
+    loading.value = false;
+  }
 }
 
 function appointmentsForSlot(slot: FieldOperationalSlot): FieldAppointment[] {

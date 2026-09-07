@@ -5,7 +5,7 @@
         <template #action><RouterLink :to="`/leads/${id}`" class="touch-target inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600">Lead detail</RouterLink></template>
       </MobileHeader>
 
-      <section v-if="loading" class="page-surface p-5 text-sm text-slate-500">Loading homeowner and appointment times…</section>
+      <PageSkeleton v-if="loading" variant="slots" />
       <section v-else-if="error" class="page-surface border-amber-200 bg-amber-50 p-5">
         <p class="field-label text-amber-700">SCHEDULING UNAVAILABLE</p>
         <p class="mt-2 text-sm text-amber-900">{{ error }}</p>
@@ -49,6 +49,7 @@
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import MobileHeader from "../components/MobileHeader.vue";
+import PageSkeleton from "../components/PageSkeleton.vue";
 import OperationalSlotPicker from "../components/OperationalSlotPicker.vue";
 import { createFieldOperationalAppointment, getFieldLead, getFieldOperationalSlots, type FieldAppointment, type FieldLeadContext, type FieldOperationalSlot } from "../services/api";
 
