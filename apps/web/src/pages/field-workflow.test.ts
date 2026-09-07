@@ -190,10 +190,14 @@ test("property detail drawer keeps its controls fixed while preserving page scro
 test("mobile lead actions stay compact and do not wrap in the shared page header", async () => {
   const homeSource = await readFile(new URL("./Home.vue", import.meta.url), "utf8");
   const headerSource = await readFile(new URL("../components/MobileHeader.vue", import.meta.url), "utf8");
+  const resultsSource = await readFile(new URL("../components/LeadResultsTable.vue", import.meta.url), "utf8");
 
   assert.match(homeSource, /inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-xl/);
   assert.match(headerSource, /flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between/);
   assert.match(headerSource, /<div class="shrink-0 self-start sm:pt-1">/);
+  assert.match(resultsSource, /<SatelliteImagePanel/);
+  assert.match(resultsSource, /class="mt-4 grid gap-2 md:hidden"/);
+  assert.match(resultsSource, /:show-street-preview="false"/);
 });
 
 test("mobile bottom navigation keeps follow-ups available in the field workflow", async () => {

@@ -114,6 +114,15 @@
         class="rounded-2xl border border-slate-200 bg-white p-4 transition"
         :class="selectedPropertyId === leadKey(lead) ? 'border-cyan-300 bg-cyan-50/40' : ''"
       >
+        <SatelliteImagePanel
+          v-if="lead.propertyId || (lead.latitude != null && lead.longitude != null)"
+          class="mb-3 min-h-0 rounded-2xl border-0"
+          :property-id="lead.propertyId ?? null"
+          :latitude="lead.latitude ?? null"
+          :longitude="lead.longitude ?? null"
+          compact
+          :show-street-preview="false"
+        />
         <div class="flex items-start justify-between gap-3">
           <button class="min-w-0 flex-1 text-left" type="button" @click="openLead(lead)">
             <h3 class="truncate text-base font-semibold text-slate-900">{{ leadTitle(lead) }}</h3>
@@ -185,6 +194,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { DiscoveryScanLead } from "@solar/contracts";
 import PropertyDetailDrawer from "./PropertyDetailDrawer.vue";
+import SatelliteImagePanel from "./SatelliteImagePanel.vue";
 
 type SortKey = "address" | "city" | "opportunityScore" | "capacity" | "confidence" | "distance" | "status";
 type SortDirection = "asc" | "desc";
