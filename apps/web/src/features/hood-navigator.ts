@@ -4,6 +4,7 @@ import {
   calculateFieldEfficiencyScore,
   estimateClusterMinutes,
 } from "../../../../packages/territory-scoring/src/hood-navigator";
+import { calculateDistanceMiles } from "../../../../packages/geospatial/src/index";
 
 export type OpportunityRouteMode = "BEST_OVERALL" | "HIGHEST_VALUE" | "FASTEST_DENSEST";
 
@@ -57,6 +58,7 @@ export function buildNavigatorClusters(
     const center = centroid(clusterLeads, scanCenter);
     const strongLeadCount = clusterLeads.filter((lead) => lead.opportunityScore >= 70).length;
     const whaleCount = clusterLeads.filter((lead) => lead.whaleScore >= 60).length;
+    const megaWhaleCount = clusterLeads.filter((lead) => lead.capacityBand === "MEGA_WHALE").length;
     const averageOpportunityScore = average(clusterLeads.map((lead) => lead.opportunityScore));
     const averageCapacityKw = averageNullable(clusterLeads.map((lead) => lead.maxRoofSolarCapacityKw));
     const densityScore = Math.min(100, Math.round((clusterLeads.length / 10) * 100));
@@ -79,7 +81,14 @@ export function buildNavigatorClusters(
       propertyCount: clusterLeads.length,
       strongLeadCount,
       whaleCount,
+      megaWhaleCount,
       averageSolarScore: average(clusterLeads.map((lead) => lead.solarFitScore)),
+      estimatedRadiusMeters: Math.round(fallbackClusterRadiusMiles * 1609.344),
+      distanceMilesFromScanCenter: distanceMiles(center, scanCenter),
+      propertyIds: clusterLeads.map((lead) => lead.propertyId ?? lead.id),
+      strongPropertyIds: clusterLeads.filter((lead) => lead.opportunityScore >= 70).map((lead) => lead.propertyId ?? lead.id),
+      whalePropertyIds: clusterLeads.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").map((lead) => lead.propertyId ?? lead.id),
+      megaWhalePropertyIds: clusterLeads.filter((lead) => lead.capacityBand === "MEGA_WHALE").map((lead) => lead.propertyId ?? lead.id),
       averageOpportunityScore,
       averageCapacityKw,
       densityScore,
@@ -232,9 +241,7 @@ function averageNullable(values: Array<number | null | undefined>): number | nul
 }
 
 function distanceMiles(left: ScanCenter, right: ScanCenter): number {
-  const lat = (right.latitude - left.latitude) * 69;
-  const lng = (right.longitude - left.longitude) * 69 * Math.cos((left.latitude * Math.PI) / 180);
-  return Math.sqrt(lat * lat + lng * lng);
+  return calculateDistanceMiles(left.latitude, left.longitude, right.latitude, right.longitude) ?? Number.POSITIVE_INFINITY;
 }
 
 function round(value: number, decimals = 0): number {

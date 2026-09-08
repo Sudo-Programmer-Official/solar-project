@@ -7,6 +7,8 @@ import {
 import {
   normalizeAddress,
   GoogleMapsGeocoder,
+  calculateDistanceMiles,
+  calculateDistanceMeters,
   type Geocoder,
 } from "../../../packages/geospatial/src/index";
 import {
@@ -1074,19 +1076,8 @@ export async function getDiscoveryNeighborDebug(
   const distanceMiles = property.latitude == null || property.longitude == null
     ? null
     : distanceMilesBetween(scan.center, { latitude: property.latitude, longitude: property.longitude });
-  const discoveredIds = new Set(diagnostics?.discoveredPropertyIds ?? []);
-  if (discoveredIds.has(property.id)) {
-    return { targetPropertyId, address, discovered: true, reason: null, distanceMiles, checkedRadiiMeters: radiiMeters };
-  }
-  const targetKey = discoveryKeyForProperty(property);
-  if ((diagnostics?.discoveredPropertyKeys ?? []).includes(targetKey)) {
-    return { targetPropertyId, address, discovered: false, reason: "duplicate", distanceMiles, checkedRadiiMeters: radiiMeters };
-  }
   if (distanceMiles == null || distanceMiles > scan.radiusMiles) {
     return { targetPropertyId, address, discovered: false, reason: "outside_radius", distanceMiles, checkedRadiiMeters: radiiMeters };
-  }
-  if ((diagnostics?.filteredPropertyIds ?? []).includes(property.id)) {
-    return { targetPropertyId, address, discovered: false, reason: "filtered_by_rule", distanceMiles, checkedRadiiMeters: radiiMeters };
   }
   const propertyUse = inferPropertyUse(property, null, null);
   if (!isResidentialPropertyUse(propertyUse)) {
@@ -1094,6 +1085,17 @@ export async function getDiscoveryNeighborDebug(
   }
   if (!isSpecificPropertyAddress(address)) {
     return { targetPropertyId, address, discovered: false, reason: "verification_failed", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  if ((diagnostics?.filteredPropertyIds ?? []).includes(property.id)) {
+    return { targetPropertyId, address, discovered: false, reason: "filtered_by_rule", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  const discoveredIds = new Set(diagnostics?.discoveredPropertyIds ?? []);
+  if (discoveredIds.has(property.id)) {
+    return { targetPropertyId, address, discovered: true, reason: null, distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  const targetKey = discoveryKeyForProperty(property);
+  if ((diagnostics?.discoveredPropertyKeys ?? []).includes(targetKey)) {
+    return { targetPropertyId, address, discovered: false, reason: "duplicate", distanceMiles, checkedRadiiMeters: radiiMeters };
   }
   if (diagnostics?.providersAttempted.some((attempt) => attempt.error != null)) {
     return { targetPropertyId, address, discovered: false, reason: "source_error", distanceMiles, checkedRadiiMeters: radiiMeters };
@@ -1519,6 +1521,7 @@ async function runDiscoveryScanJob(
             longitude: center.longitude,
             radiusMiles,
             limit: discoveryLimit,
+            coverageCellCount: coverageCells.length,
           }, knownCount, geocoder, diagnostics, knownKeys, selectDiscoveryAnchors(knownCandidates)),
           Math.max(1, discoveryBudgetMs - (Date.now() - startedAt)),
           new DiscoveryStageTimeoutError("PROPERTY_DISCOVERY", discoveryBudgetMs),
@@ -2314,23 +2317,22 @@ async function buildDiscoveryCandidates(
       markets,
       metadataByPropertyId.get(property.id) ?? emptyDiscoveryPropertyMetadata(),
     );
-    if (!isResidentialPropertyUse(candidate.propertyUse)) {
-      continue;
-    }
     candidates.push(candidate);
   }
   if (diagnostics) {
-    diagnostics.rawCandidateCount += properties.length;
+    // Raw discovery is scoped to the requested radius. Records outside the
+    // scan are provider diagnostics, not market candidates for this scan.
+    diagnostics.rawCandidateCount += nearbyProperties.length;
     diagnostics.deduplicatedCandidateCount += candidates.length;
-    diagnostics.residentialCandidateCount += candidates.length;
+    diagnostics.residentialCandidateCount += candidates.filter((candidate) => isResidentialPropertyUse(candidate.propertyUse)).length;
     diagnostics.prequalifiedCount = diagnostics.deduplicatedCandidateCount;
     diagnostics.providersAttempted.push({
       provider: "existing_properties",
       supported: true,
       requestCount: 1,
-      recordsReturned: properties.length,
+      recordsReturned: nearbyProperties.length,
       recordsAccepted: candidates.length,
-      recordsRejected: Math.max(0, properties.length - candidates.length),
+      recordsRejected: Math.max(0, properties.length - nearbyProperties.length),
       rejectionReasons: {
         missing_geometry: missingGeometry,
         outside_radius: outsideRadius,
@@ -3860,8 +3862,21 @@ function buildDiscoveryClusterSummary(
     candidateCount: propertyCount,
     propertyCount,
     strongLeadCount,
-    whaleCount: cluster.members.filter((candidate) => (candidate.opportunityAssessment?.whaleScore ?? 0) >= 60).length,
+    whaleCount: cluster.members.filter((candidate) => candidate.funnelBucket === "WHALE").length,
+    megaWhaleCount: cluster.members.filter((candidate) => candidate.funnelBucket === "WHALE" && candidate.capacityBand === "MEGA_WHALE").length,
     averageSolarScore: roundDecimal(averageSolarScore, 1),
+    estimatedRadiusMeters: Math.round(clusterRadiusMeters),
+    distanceMilesFromScanCenter: roundDecimal(distanceMilesFromStart, 1),
+    propertyIds: cluster.members.map((candidate) => candidate.property.id),
+    strongPropertyIds: cluster.members
+      .filter((candidate) => isStrongDiscoveryCandidate(candidate))
+      .map((candidate) => candidate.property.id),
+    whalePropertyIds: cluster.members
+      .filter((candidate) => candidate.funnelBucket === "WHALE")
+      .map((candidate) => candidate.property.id),
+    megaWhalePropertyIds: cluster.members
+      .filter((candidate) => candidate.funnelBucket === "WHALE" && candidate.capacityBand === "MEGA_WHALE")
+      .map((candidate) => candidate.property.id),
     averageOpportunityScore: roundDecimal(averageOpportunityScore, 1),
     averageCapacityKw,
     densityScore,
@@ -6219,29 +6234,14 @@ function distanceMeters(
   a: NormalizedCoordinates,
   b: NormalizedCoordinates | null,
 ): number | null {
-  if (!b) return null;
-  const earthRadiusMeters = 6371000;
-  const lat1 = (a.latitude * Math.PI) / 180;
-  const lat2 = (b.latitude * Math.PI) / 180;
-  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
-  const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
-  const sinLat = Math.sin(dLat / 2);
-  const sinLng = Math.sin(dLng / 2);
-  const haversine =
-    sinLat * sinLat +
-    Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
-  return Math.round(2 * earthRadiusMeters * Math.asin(Math.sqrt(haversine)));
+  return calculateDistanceMeters(a.latitude, a.longitude, b?.latitude, b?.longitude);
 }
 
 function distanceMilesBetween(
   a: NormalizedCoordinates,
   b: NormalizedCoordinates,
 ): number {
-  const meters = distanceMeters(a, b);
-  if (meters == null) {
-    return Number.POSITIVE_INFINITY;
-  }
-  return meters / 1609.344;
+  return calculateDistanceMiles(a.latitude, a.longitude, b.latitude, b.longitude) ?? Number.POSITIVE_INFINITY;
 }
 
 function resolveAnalysisDependencies(

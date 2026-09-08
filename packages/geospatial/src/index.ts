@@ -3,6 +3,8 @@ export interface Coordinate {
   longitude: number;
 }
 
+export * from "./distance";
+
 export function isCoordinate(value: unknown): value is Coordinate {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;

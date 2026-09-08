@@ -19,6 +19,10 @@ export interface PropertyDiscoveryInput {
   longitude: number;
   radiusMiles: number;
   limit?: number;
+  /** Number of spatial coverage cells requested by the scan. This is separate
+   * from the ranked-result limit so fallback providers cannot stop early just
+   * because the UI only asked for one page of leads. */
+  coverageCellCount?: number;
 }
 
 export interface PropertyDiscoveryProvider {
@@ -131,7 +135,9 @@ export class GridGeocodingPropertyDiscoveryProvider implements PropertyDiscovery
       return [];
     }
 
-    const sampleLimit = Math.max(16, Math.min(250, Math.round((input.limit ?? 40) * this.sampleMultiplier)));
+    const coverageSamples = Math.max(0, Math.round((input.coverageCellCount ?? 0) * 4));
+    const rankedResultSamples = Math.max(16, Math.round((input.limit ?? 40) * this.sampleMultiplier));
+    const sampleLimit = Math.max(16, Math.min(2000, Math.max(coverageSamples, rankedResultSamples)));
     const samples = buildSamplingPoints(input.latitude, input.longitude, input.radiusMiles, sampleLimit);
     const discovered: DiscoveredProperty[] = [];
     for (const sample of samples) {
@@ -281,7 +287,9 @@ function buildSamplingPoints(
 ): Array<{ latitude: number; longitude: number }> {
   const metersPerMile = 1609.344;
   const radiusMeters = Math.max(500, radiusMiles * metersPerMile);
-  const rings = Math.max(2, Math.min(5, Math.ceil(limit / 8)));
+  // More coverage cells require more spatial samples. This is deliberately
+  // independent from the ranked result page size.
+  const rings = Math.max(2, Math.min(20, Math.ceil(Math.sqrt(limit / 4))));
   const points: Array<{ latitude: number; longitude: number }> = [{ latitude, longitude }];
   for (let ring = 1; ring <= rings && points.length < limit; ring += 1) {
     const ringRadius = (radiusMeters * ring) / (rings + 0.5);

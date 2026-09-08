@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import type { LocationResolveResponse } from "@solar/contracts";
 import { reverseLocation, resolveLocation } from "../services/api";
+import { persistCurrentLocation } from "../composables/useCurrentLocation";
 
 export interface SearchFilters {
   whaleCandidates: boolean;
@@ -112,6 +113,7 @@ export const useSearchContextStore = defineStore("search-context", () => {
     resolvingLocation.value = true;
     try {
       const position = await getCurrentPosition();
+      persistCurrentLocation(position.coords.latitude, position.coords.longitude);
       const resolved = await reverseLocation({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,

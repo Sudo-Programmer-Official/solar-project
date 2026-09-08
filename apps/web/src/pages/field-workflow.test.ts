@@ -231,6 +231,10 @@ test("Labs route workspace persists selections and stays discoverable", async ()
   assert.match(routeSource, /grid gap-3 p-3 md:hidden/);
   assert.match(routeSource, /Navigate/);
   assert.match(routeSource, /Remove/);
+  assert.match(routeSource, /calculateDistanceMiles/);
+  assert.match(routeSource, /LIVE_DEVICE/);
+  assert.match(routeSource, /SEARCH_CENTER/);
+  assert.match(routeSource, /Distance debug \(temporary\)/);
   assert.match(appSource, /aria-label="Labs navigation"/);
   assert.match(appSource, /Route<span v-if="hunt\.savedRouteCount > 0">/);
   assert.match(huntSource, /addSavedRouteItem/);

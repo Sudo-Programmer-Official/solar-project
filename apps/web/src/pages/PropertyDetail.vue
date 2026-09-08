@@ -121,6 +121,10 @@
               <span class="text-slate-500">Image match</span>
               <strong class="mt-1 block text-slate-900">{{ locationMatchLabel }}</strong>
             </div>
+            <div class="rounded-2xl bg-cyan-50 p-3">
+              <span class="text-slate-500">Distance from me</span>
+              <strong class="mt-1 block text-slate-900">{{ currentDistanceLabel }}</strong>
+            </div>
           </div>
         </div>
 
@@ -277,6 +281,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import type { LeadOutcome, NextBestAction, HomeownerConfirmationState, PropertyVisualSignal, ConversationInsight } from "@solar/contracts";
+import { calculateDistanceMiles } from "../../../../packages/geospatial/src/index";
 import MobileHeader from "../components/MobileHeader.vue";
 import EmptyState from "../components/EmptyState.vue";
 import LoadingCard from "../components/LoadingCard.vue";
@@ -287,6 +292,7 @@ import WhaleBadge from "../components/WhaleBadge.vue";
 import SignalChip from "../components/SignalChip.vue";
 import NextBestActionCard from "../components/NextBestAction.vue";
 import { useLeadStore } from "../stores/lead.store";
+import { useCurrentLocation } from "../composables/useCurrentLocation";
 import { useLeadActions } from "../composables/useLeadActions";
 import { buildGoogleMapsDirectionsUrl, buildGoogleMapsSearchUrl } from "../services/imagery";
 import { savePropertyVisualSignals } from "../services/api";
@@ -294,6 +300,7 @@ import { savePropertyVisualSignals } from "../services/api";
 const route = useRoute();
 const router = useRouter();
 const leadStore = useLeadStore();
+const currentLocation = useCurrentLocation();
 const { leadDetail, loading } = storeToRefs(leadStore);
 const { updateOutcome } = useLeadActions();
 
@@ -348,6 +355,18 @@ const locationMatchLabel = computed(() => {
   const meters = detail.value?.locationVerification?.distanceMeters;
   return meters == null ? "Unknown" : `${meters} m`;
 });
+const currentDistanceMiles = computed(() => calculateDistanceMiles(
+  currentLocation.latitude.value,
+  currentLocation.longitude.value,
+  detail.value?.property.latitude,
+  detail.value?.property.longitude,
+));
+const currentDistanceLabel = computed(() => {
+  if (currentDistanceMiles.value == null) return "Unavailable";
+  return currentLocation.source.value === "RECENT_DEVICE"
+    ? `~${currentDistanceMiles.value.toFixed(1)} mi away · recent`
+    : `~${currentDistanceMiles.value.toFixed(1)} mi away`;
+});
 const conversationInsights = computed<ConversationInsight[]>(() => detail.value?.conversationInsights ?? []);
 const signalChips = computed<string[]>(() => (detail.value?.visualSignals ?? []).filter((signal) => signal.status === "DETECTED").map(formatVisualSignalLabel));
 const compactSignalLabel = computed(() => signalChips.value[0] ?? null);
@@ -367,6 +386,7 @@ const nextBestAction = computed<NextBestAction>(() => {
 
 onMounted(() => {
   void reload();
+  void currentLocation.refresh();
 });
 
 watch(

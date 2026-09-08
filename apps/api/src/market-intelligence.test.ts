@@ -56,6 +56,63 @@ test("market funnel prioritizes exclusions and verification before scores", () =
     strongScore: 90,
     capacityKw: 22,
   }), "WHALE");
+  assert.equal(classifyMarketCandidate({
+    propertyUse: "COMMERCIAL",
+    address: "1 Convention Center Dr, Example, PA",
+    verificationStatus: "REJECTED",
+    existingSolarStatus: "NOT_DETECTED",
+    solarScore: 100,
+    whaleScore: 100,
+    strongScore: 100,
+    capacityKw: 45,
+  }), "NON_RESIDENTIAL");
+  assert.equal(classifyMarketCandidate({
+    propertyUse: "VACANT",
+    address: "999 Forest Parcel, Example, PA",
+    verificationStatus: "REJECTED",
+    existingSolarStatus: "NOT_DETECTED",
+    solarScore: 100,
+    whaleScore: 100,
+    strongScore: 100,
+    capacityKw: 45,
+  }), "NO_BUILDING");
+  assert.equal(classifyMarketCandidate({
+    propertyUse: "SINGLE_FAMILY",
+    address: "Altoona, PA",
+    verificationStatus: "REVIEW",
+    existingSolarStatus: "NOT_DETECTED",
+    solarScore: 100,
+    whaleScore: 100,
+    strongScore: 100,
+    capacityKw: 45,
+  }), "BAD_ADDRESS");
+  assert.equal(classifyMarketCandidate({
+    propertyUse: "SINGLE_FAMILY",
+    address: "3306 Pleasant Valley Blvd",
+    verificationStatus: "VERIFIED",
+    existingSolarStatus: "NOT_DETECTED",
+    solarScore: 90,
+    whaleScore: 65,
+    strongScore: 90,
+    capacityKw: 22,
+    duplicate: true,
+  }), "DUPLICATE");
+  assert.equal(classifyMarketCandidate({
+    propertyUse: "SINGLE_FAMILY",
+    address: "3306 Pleasant Valley Blvd",
+    verificationStatus: "REJECTED",
+    existingSolarStatus: "NOT_DETECTED",
+    solarScore: 100,
+    whaleScore: 100,
+    strongScore: 100,
+    capacityKw: 45,
+  }), "UNVERIFIED");
   assert.equal(classifyDiscoveryCapacityBand(17), "LARGE");
+  assert.equal(classifyDiscoveryCapacityBand(0.5), "STANDARD");
+  assert.equal(classifyDiscoveryCapacityBand(14.99), "STANDARD");
+  assert.equal(classifyDiscoveryCapacityBand(15), "LARGE");
+  assert.equal(classifyDiscoveryCapacityBand(19.99), "LARGE");
+  assert.equal(classifyDiscoveryCapacityBand(20), "WHALE");
+  assert.equal(classifyDiscoveryCapacityBand(29.99), "WHALE");
   assert.equal(classifyDiscoveryCapacityBand(31), "MEGA_WHALE");
 });

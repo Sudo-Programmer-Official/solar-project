@@ -44,8 +44,19 @@
         </div>
       </div>
 
-      <div v-if="route?.startingLatitude != null && route?.startingLongitude != null" class="mt-4 inline-flex rounded-full bg-white/80 px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200/80">
-        Distance is measured from the scan location
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <span class="inline-flex rounded-full bg-white/80 px-3 py-2 text-xs font-semibold text-slate-600 ring-1 ring-slate-200/80">
+          {{ originSummary }}
+        </span>
+        <button
+          v-if="distanceOrigin?.source !== 'LIVE_DEVICE'"
+          class="min-h-touch rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-cyan-200 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          :disabled="locationLoading"
+          @click="refreshLocation"
+        >
+          {{ locationLoading ? "Locating…" : "Use my location" }}
+        </button>
       </div>
     </section>
 
@@ -87,7 +98,7 @@
               <tr v-for="item in items" :key="item.id" class="transition hover:bg-cyan-50/40">
                 <td class="max-w-[320px] truncate px-4 py-4 font-semibold text-slate-900" :title="item.address">{{ item.address }}</td>
                 <td class="px-4 py-4 text-slate-600">{{ locationLabel(item) }}</td>
-                <td class="px-4 py-4 text-slate-600">{{ distanceLabel(item.distanceMiles) }}</td>
+                <td class="px-4 py-4 text-slate-600">{{ distanceLabel(item) }}</td>
                 <td class="px-4 py-4"><span class="rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">{{ item.opportunityScore }}</span></td>
                 <td class="px-4 py-4"><span class="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">{{ statusLabel(item.status) }}</span></td>
                 <td class="px-4 py-4">
@@ -107,7 +118,7 @@
             <div class="flex items-start justify-between gap-3">
               <button class="min-w-0 flex-1 text-left" type="button" @click="openProperty(item)">
                 <h3 class="truncate text-base font-semibold text-slate-900">{{ item.address }}</h3>
-                <p class="mt-1 truncate text-sm text-slate-500">{{ locationLabel(item) }} · {{ distanceLabel(item.distanceMiles) }}</p>
+                <p class="mt-1 truncate text-sm text-slate-500">{{ locationLabel(item) }} · {{ distanceLabel(item) }}</p>
               </button>
               <span class="shrink-0 rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">{{ item.opportunityScore }}</span>
             </div>
@@ -129,6 +140,18 @@
         <p class="mt-2 text-sm font-semibold text-slate-900">{{ routePlan.stops.length }} stops ordered from your current location.</p>
         <p class="mt-1 text-sm text-slate-600">Use the saved list above to view or navigate to any property.</p>
       </section>
+
+      <details class="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600">
+        <summary class="cursor-pointer font-semibold text-slate-700">Distance debug (temporary)</summary>
+        <div class="mt-3 space-y-2">
+          <p><strong>Origin source:</strong> {{ distanceOrigin?.source ?? "UNAVAILABLE" }}</p>
+          <p><strong>Origin coordinates:</strong> {{ coordinateLabel(distanceOrigin) }}</p>
+          <p v-for="item in items" :key="`debug-${item.id}`">
+            <strong>{{ item.address }}:</strong>
+            property {{ coordinateLabel(item) }} · calculated {{ distanceLabel(item) }}
+          </p>
+        </div>
+      </details>
     </template>
 
     <PropertyDetailDrawer
@@ -148,7 +171,10 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import type { SavedRouteItem } from "@solar/contracts";
+import { calculateDistanceMiles, isValidCoordinate, type DistanceCoordinate } from "../../../../packages/geospatial/src/index";
 import { useHuntStore } from "../stores/hunt.store";
+import { useSearchContextStore } from "../stores/search-context.store";
+import { useCurrentLocation, type CurrentLocationSource } from "../composables/useCurrentLocation";
 import { useLeadActions } from "../composables/useLeadActions";
 import { useFeedbackStore } from "../stores/feedback.store";
 import EmptyState from "../components/EmptyState.vue";
@@ -158,6 +184,8 @@ import PropertyDetailDrawer from "../components/PropertyDetailDrawer.vue";
 
 const router = useRouter();
 const hunt = useHuntStore();
+const searchStore = useSearchContextStore();
+const currentLocation = useCurrentLocation();
 const feedback = useFeedbackStore();
 const { openDirections } = useLeadActions();
 
@@ -174,13 +202,47 @@ const selectedPosition = computed(() => {
 });
 const selectedTitle = computed(() => items.value.find((item) => item.propertyId === selectedPropertyId.value)?.address ?? null);
 const routePlan = computed(() => hunt.routePlan);
+const locationLoading = computed(() => currentLocation.loading.value);
+const distanceOrigin = computed<RouteDistanceOrigin | null>(() => {
+  const liveCoordinate = coordinateFrom(currentLocation.latitude.value, currentLocation.longitude.value);
+  if (liveCoordinate) {
+    return {
+      ...liveCoordinate,
+      source: currentLocation.source.value ?? "RECENT_DEVICE",
+    };
+  }
 
-onMounted(() => {
-  void loadRoute();
+  const savedSearchCenter = route.value
+    ? coordinateFrom(route.value.startingLatitude, route.value.startingLongitude)
+    : null;
+  const fallbackSearchCenter = savedSearchCenter ?? (searchStore.context
+    ? coordinateFrom(searchStore.context.latitude, searchStore.context.longitude)
+    : null);
+  return fallbackSearchCenter ? { ...fallbackSearchCenter, source: "SEARCH_CENTER" } : null;
+});
+const originSummary = computed(() => {
+  switch (distanceOrigin.value?.source) {
+    case "LIVE_DEVICE": return "Distances use your current device location";
+    case "RECENT_DEVICE": return "Distances use your most recent device location";
+    case "SEARCH_CENTER": return "Approximate distances from the saved search center";
+    default: return "Distance unavailable until a location is available";
+  }
+});
+
+type RouteDistanceOriginSource = Exclude<CurrentLocationSource, null> | "SEARCH_CENTER";
+type RouteDistanceOrigin = DistanceCoordinate & { source: RouteDistanceOriginSource };
+
+onMounted(async () => {
+  searchStore.hydrate();
+  await Promise.all([loadRoute(), refreshLocation()]);
 });
 
 async function loadRoute() {
   await hunt.loadSavedRoute();
+}
+
+async function refreshLocation() {
+  await currentLocation.refresh();
 }
 
 function openFinder() {
@@ -191,12 +253,13 @@ async function startRoute() {
   if (items.value.length === 0 || routeLoading.value) return;
   routeLoading.value = true;
   try {
-    const first = route.value;
+    const origin = distanceOrigin.value;
+    if (!origin) {
+      throw new Error("Enable location or return to Lead Finder so the route has a search center.");
+    }
     await hunt.generateRoute(
       items.value.map((item) => item.propertyId),
-      first?.startingLatitude != null && first?.startingLongitude != null
-        ? { latitude: first.startingLatitude, longitude: first.startingLongitude }
-        : undefined,
+      { latitude: origin.latitude, longitude: origin.longitude },
     );
     feedback.success("Route ordered and ready");
   } catch (cause) {
@@ -251,8 +314,28 @@ function locationLabel(item: SavedRouteItem) {
   return [item.city, item.state, item.postalCode].filter(Boolean).join(", ") || "Location unavailable";
 }
 
-function distanceLabel(value: number | null) {
-  return value == null ? "Distance unknown" : value.toFixed(1) + " mi";
+function distanceFor(item: SavedRouteItem) {
+  const origin = distanceOrigin.value;
+  return origin
+    ? calculateDistanceMiles(origin.latitude, origin.longitude, item.latitude, item.longitude)
+    : null;
+}
+
+function coordinateFrom(latitude: number | null | undefined, longitude: number | null | undefined): DistanceCoordinate | null {
+  return isValidCoordinate({ latitude, longitude }) ? { latitude: latitude as number, longitude: longitude as number } : null;
+}
+
+function distanceLabel(item: SavedRouteItem) {
+  const distance = distanceFor(item);
+  if (distance == null) return "Distance unavailable";
+  return distanceOrigin.value?.source === "SEARCH_CENTER"
+    ? `~${distance.toFixed(1)} mi from search center`
+    : `~${distance.toFixed(1)} mi away`;
+}
+
+function coordinateLabel(value: DistanceCoordinate | SavedRouteItem | RouteDistanceOrigin | null | undefined) {
+  if (!value || !isValidCoordinate(value)) return "unavailable";
+  return `${value.latitude.toFixed(6)}, ${value.longitude.toFixed(6)}`;
 }
 
 function statusLabel(value: SavedRouteItem["status"]) {

@@ -1521,17 +1521,10 @@ async function hydrateSavedRoute(client: SqlClient, route: SavedRouteRow): Promi
     `SELECT ri.id, ri.route_id, ri.property_id, ri.position, ri.status, ri.added_at,
             COALESCE(NULLIF(p.street, ''), NULLIF(p.normalized_address, ''), 'Address unavailable') AS address,
             p.city, p.state, p.postal_code, p.latitude, p.longitude,
-            CASE
-              WHEN r.starting_latitude IS NOT NULL
-               AND r.starting_longitude IS NOT NULL
-               AND p.latitude IS NOT NULL
-               AND p.longitude IS NOT NULL
-              THEN ST_Distance(
-                ST_SetSRID(ST_MakePoint(p.longitude, p.latitude), 4326)::geography,
-                ST_SetSRID(ST_MakePoint(r.starting_longitude, r.starting_latitude), 4326)::geography
-              ) / 1609.344
-              ELSE NULL
-            END AS distance_miles,
+            -- Distance is derived by the client from the user's current
+            -- origin. The saved route start is only a search-center fallback
+            -- and must not be returned as an authoritative field distance.
+            NULL::double precision AS distance_miles,
             COALESCE(oa.overall_opportunity_score, oa.field_priority_score, 0) AS opportunity_score
        FROM field_ops.route_items ri
        JOIN field_ops.routes r ON r.id = ri.route_id

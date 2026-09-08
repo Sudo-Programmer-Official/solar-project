@@ -669,6 +669,59 @@ test("discovery debug explains why a known neighboring property was missed", asy
   assert.equal(explanation?.reason, "outside_radius");
 });
 
+test("neighbor diagnostics expose all configured radii and rejected nearby properties", async () => {
+  const repository = new InMemorySolarRepository();
+  const center = { latitude: 40, longitude: -79 };
+  const properties = [
+    ["neighbor-center", 40, -79, "100 Main St, Example, PA 16000"],
+    ["neighbor-50m", 40.0003, -79, "101 Main St, Example, PA 16000"],
+    ["neighbor-100m", 40.0008, -79, "102 Main St, Example, PA 16000"],
+    ["neighbor-200m", 40.0017, -79, "103 Main St, Example, PA 16000"],
+    ["neighbor-300m", 40.0026, -79, "104 Main St, Example, PA 16000"],
+  ] as const;
+  for (const [id, latitude, longitude, address] of properties) {
+    await repository.upsertProperty({
+      id,
+      normalizedAddress: address,
+      street: address.split(",")[0],
+      city: "Example",
+      county: "Example",
+      state: "PA",
+      postalCode: "16000",
+      latitude,
+      longitude,
+      parcelId: id,
+      municipality: "Example",
+      createdAt: new Date().toISOString(),
+    });
+  }
+  await repository.upsertProperty({
+    id: "neighbor-commercial",
+    normalizedAddress: "105 Convention Center Dr, Example, PA 16000",
+    street: "105 Convention Center Dr",
+    city: "Example",
+    county: "Example",
+    state: "PA",
+    postalCode: "16000",
+    latitude: 40.0002,
+    longitude: -79,
+    parcelId: "neighbor-commercial",
+    municipality: "Example",
+    createdAt: new Date().toISOString(),
+  });
+
+  const scan = await scanDiscovery({ latitude: center.latitude, longitude: center.longitude, radiusMiles: 5, filters: {}, limit: 10, maxGoogleSolarCalls: 0 }, repository);
+  const progress = getDiscoveryScan(scan.scanId);
+  const centerLead = scan.results.find((lead) => lead.propertyId === "neighbor-center");
+  assert.deepEqual(progress?.discoveryDiagnostics?.neighborExpansion?.distancesMeters, [50, 100, 200, 300]);
+  assert.deepEqual(centerLead?.nearbyCountsByRadius, { "50": 2, "100": 3, "200": 4, "300": 5 });
+  assert.equal((scan.marketMetrics?.funnel.nonResidential ?? 0) >= 1, true);
+
+  const rejected = await getDiscoveryNeighborDebug(scan.scanId, "neighbor-commercial", repository);
+  assert.equal(rejected?.discovered, false);
+  assert.equal(rejected?.reason, "non_residential");
+});
+
 test("discovery paginates uniquely and excludes obvious commercial properties", async () => {
   const repository = new InMemorySolarRepository();
   const baseLatitude = 40.0;

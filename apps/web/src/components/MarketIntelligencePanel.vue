@@ -43,7 +43,7 @@
       <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
         <p class="field-label">CAPACITY BANDS</p>
         <div class="mt-2 grid grid-cols-4 gap-2 text-center text-xs">
-          <div><strong class="block text-sm text-slate-900">{{ metrics.capacityBands.standard }}</strong><span class="text-slate-500">10–14.9 kW</span></div>
+          <div><strong class="block text-sm text-slate-900">{{ metrics.capacityBands.standard }}</strong><span class="text-slate-500">&lt;15 kW</span></div>
           <div><strong class="block text-sm text-slate-900">{{ metrics.capacityBands.large }}</strong><span class="text-slate-500">15–19.9 kW</span></div>
           <div><strong class="block text-sm text-slate-900">{{ metrics.capacityBands.whale }}</strong><span class="text-slate-500">20–29.9 kW</span></div>
           <div><strong class="block text-sm text-slate-900">{{ metrics.capacityBands.megaWhale }}</strong><span class="text-slate-500">30+ kW</span></div>

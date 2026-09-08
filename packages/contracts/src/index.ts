@@ -787,6 +787,13 @@ export interface DiscoveryClusterSummary extends NeighborhoodCluster {
   id: string;
   candidateCount: number;
   averageSolarScore: number;
+  megaWhaleCount: number;
+  estimatedRadiusMeters: number;
+  distanceMilesFromScanCenter: number;
+  propertyIds: string[];
+  strongPropertyIds: string[];
+  whalePropertyIds: string[];
+  megaWhalePropertyIds: string[];
   saturation?: DiscoverySaturationSummary;
 }
 
@@ -1220,6 +1227,11 @@ export interface SavedRouteItem {
   postalCode: string | null;
   latitude: number | null;
   longitude: number | null;
+  /**
+   * Deprecated server field. Route distances are derived at read time from
+   * the active origin and property coordinates; this remains nullable for
+   * compatibility with older clients and saved-route responses.
+   */
   distanceMiles: number | null;
   opportunityScore: number;
 }

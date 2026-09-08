@@ -99,12 +99,22 @@
           <div>
             <p class="field-label">Pocket {{ cluster.rank }}</p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">{{ cluster.label }}</h3>
-            <p class="mt-1 text-sm text-slate-500">{{ cluster.count }} homes · {{ cluster.strongLeadCount }} strong · {{ cluster.whaleCount }} whales</p>
-            <p class="mt-1 text-xs text-slate-500">Field priority {{ cluster.fieldPriorityScore }} · {{ cluster.saturationPercent ?? 0 }}% untouched</p>
+            <p class="mt-1 text-sm text-slate-500">{{ cluster.count }} properties · {{ cluster.strongLeadCount }} strong · {{ cluster.whaleCount }} whales · {{ cluster.megaWhaleCount }} mega</p>
+            <p class="mt-1 text-xs text-slate-500">{{ clusterDistanceLabel(cluster) }} · {{ Math.round(cluster.estimatedRadiusMeters) }}m radius · {{ cluster.saturationPercent ?? 0 }}% untouched</p>
           </div>
           <button class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold tracking-[0.08em] text-slate-600 shadow-sm" @click="viewCluster(cluster.key)">
             View Cluster
           </button>
+        </div>
+        <div class="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
+          <span class="rounded-xl bg-slate-50 px-2 py-2">{{ cluster.saturation?.knocked ?? 0 }} knocked</span>
+          <span class="rounded-xl bg-slate-50 px-2 py-2">{{ cluster.saturation?.appointments ?? 0 }} appointments</span>
+          <span class="rounded-xl bg-slate-50 px-2 py-2">{{ cluster.saturation?.closed ?? 0 }} closed</span>
+        </div>
+        <div class="mt-3 grid grid-cols-3 gap-2">
+          <button class="touch-target rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700" type="button" @click="addClusterToRoute(cluster, 'whales')">Add whales</button>
+          <button class="touch-target rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs font-semibold text-slate-700" type="button" @click="addClusterToRoute(cluster, 'strong')">Add strong</button>
+          <button class="touch-target rounded-xl bg-primary-500 px-2 py-2 text-xs font-semibold text-white" type="button" @click="addClusterToRoute(cluster, 'all')">Add cluster</button>
         </div>
       </article>
     </section>
@@ -290,6 +300,7 @@ import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { ElNotification } from "element-plus";
 import type { DiscoveryScanLead, LocationResolveResponse } from "@solar/contracts";
+import { calculateDistanceMiles } from "../../../../packages/geospatial/src/index";
 import { useCurrentLocation } from "../composables/useCurrentLocation";
 import { useLeadActions } from "../composables/useLeadActions";
 import { useHuntStore } from "../stores/hunt.store";
@@ -358,8 +369,8 @@ const strongLeadCount = computed(() => hunt.strongLeadCount);
 const solarAnalyzedCount = computed(() => hunt.solarAnalyzedCount);
 const solarAnalysisTarget = computed(() => hunt.solarAnalysisTarget);
 const searchStoreRadiusLabel = computed(() => `${searchContextStore.radiusMiles} mi radius`);
-const currentLatitude = computed(() => resolvedLocation.value?.latitude ?? hunt.lastLatitude ?? null);
-const currentLongitude = computed(() => resolvedLocation.value?.longitude ?? hunt.lastLongitude ?? null);
+const currentLatitude = computed(() => currentLocation.latitude.value ?? resolvedLocation.value?.latitude ?? hunt.lastLatitude ?? null);
+const currentLongitude = computed(() => currentLocation.longitude.value ?? resolvedLocation.value?.longitude ?? hunt.lastLongitude ?? null);
 const canScan = computed(() => resolvedLocation.value != null);
 const summary = computed(() => ({
   whales: results.value.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
@@ -455,12 +466,38 @@ const clusters = computed(() => {
           leads: clusterLeads,
           strongLeadCount: cluster.strongLeadCount,
           whaleCount: cluster.whaleCount,
+          megaWhaleCount: cluster.megaWhaleCount,
           fieldPriorityScore: cluster.fieldPriorityScore,
           saturationPercent: cluster.saturation?.untouchedPercent ?? null,
+          saturation: cluster.saturation,
+          center: cluster.center,
+          estimatedRadiusMeters: cluster.estimatedRadiusMeters,
+          propertyIds: cluster.propertyIds,
+          strongPropertyIds: cluster.strongPropertyIds,
+          whalePropertyIds: cluster.whalePropertyIds,
+          megaWhalePropertyIds: cluster.megaWhalePropertyIds,
         };
       });
   }
-  const groups = new Map<string, { key: string; rank: number; label: string; count: number; leads: DiscoveryScanLead[]; strongLeadCount: number; whaleCount: number; fieldPriorityScore: number; saturationPercent: number | null }>();
+  const groups = new Map<string, {
+    key: string;
+    rank: number;
+    label: string;
+    count: number;
+    leads: DiscoveryScanLead[];
+    strongLeadCount: number;
+    whaleCount: number;
+    megaWhaleCount: number;
+    fieldPriorityScore: number;
+    saturationPercent: number | null;
+    saturation: null;
+    center: { latitude: number; longitude: number };
+    estimatedRadiusMeters: number;
+    propertyIds: string[];
+    strongPropertyIds: string[];
+    whalePropertyIds: string[];
+    megaWhalePropertyIds: string[];
+  }>();
   for (const lead of results.value) {
     if (lead.funnelBucket !== "STRONG" && lead.funnelBucket !== "WHALE") continue;
     const key = clusterKeyForLead(lead);
@@ -472,13 +509,26 @@ const clusters = computed(() => {
       leads: [],
       strongLeadCount: 0,
       whaleCount: 0,
+      megaWhaleCount: 0,
       fieldPriorityScore: 0,
       saturationPercent: null,
+      saturation: null,
+      center: { latitude: lead.latitude ?? 0, longitude: lead.longitude ?? 0 },
+      estimatedRadiusMeters: 250,
+      propertyIds: [],
+      strongPropertyIds: [],
+      whalePropertyIds: [],
+      megaWhalePropertyIds: [],
     };
     current.count += 1;
     current.leads.push(lead);
     current.strongLeadCount += lead.opportunityScore >= 70 ? 1 : 0;
     current.whaleCount += lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE" ? 1 : 0;
+    current.megaWhaleCount += lead.capacityBand === "MEGA_WHALE" ? 1 : 0;
+    current.propertyIds.push(lead.propertyId ?? lead.id);
+    if (lead.opportunityScore >= 70) current.strongPropertyIds.push(lead.propertyId ?? lead.id);
+    if (lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE") current.whalePropertyIds.push(lead.propertyId ?? lead.id);
+    if (lead.capacityBand === "MEGA_WHALE") current.megaWhalePropertyIds.push(lead.propertyId ?? lead.id);
     current.fieldPriorityScore = Math.max(current.fieldPriorityScore, lead.fieldPriorityScore ?? 0);
     groups.set(key, current);
   }
@@ -487,6 +537,38 @@ const clusters = computed(() => {
     .sort((left, right) => right.fieldPriorityScore - left.fieldPriorityScore || right.count - left.count)
     .map((cluster, index) => ({ ...cluster, rank: index + 1 }));
 });
+
+type ClusterRouteTarget = {
+  center: { latitude: number; longitude: number };
+  distanceMilesFromScanCenter?: number;
+  propertyIds: string[];
+  strongPropertyIds: string[];
+  whalePropertyIds: string[];
+};
+
+function clusterDistanceLabel(cluster: ClusterRouteTarget): string {
+  const latitude = currentLatitude.value;
+  const longitude = currentLongitude.value;
+  const distance = calculateDistanceMiles(latitude, longitude, cluster.center.latitude, cluster.center.longitude);
+  if (distance != null) {
+    return `~${distance.toFixed(1)} mi away`;
+  }
+  return `~${(cluster.distanceMilesFromScanCenter ?? 0).toFixed(1)} mi from scan center`;
+}
+
+async function addClusterToRoute(cluster: ClusterRouteTarget, mode: "all" | "strong" | "whales") {
+  const ids = mode === "strong"
+    ? cluster.strongPropertyIds
+    : mode === "whales"
+      ? cluster.whalePropertyIds
+      : cluster.propertyIds;
+  const selected = new Set(hunt.selectedPropertyIds);
+  for (const propertyId of ids) {
+    if (selected.has(propertyId)) continue;
+    await hunt.toggleSavedRouteItem(propertyId);
+    selected.add(propertyId);
+  }
+}
 
 const mapPoints = computed<PropertyVisualPoint[]>(() => {
   const points: PropertyVisualPoint[] = [];

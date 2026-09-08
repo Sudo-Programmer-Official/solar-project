@@ -8,6 +8,7 @@ import type {
   DiscoverySaturationSummary,
   ScanCenter,
 } from "../../../packages/contracts/src/index";
+import { calculateDistanceMiles } from "../../../packages/geospatial/src/index";
 
 const MILES_PER_LATITUDE_DEGREE = 69;
 
@@ -55,8 +56,7 @@ export function classifyDiscoveryCapacityBand(
   if (capacityKw >= thresholds.megaWhaleKw) return "MEGA_WHALE";
   if (capacityKw >= thresholds.whaleKw) return "WHALE";
   if (capacityKw >= thresholds.largeKw) return "LARGE";
-  if (capacityKw >= 10) return "STANDARD";
-  return "UNKNOWN";
+  return "STANDARD";
 }
 
 export function emptyDiscoveryCapacityBandCounts(): DiscoveryCapacityBandCounts {
@@ -256,12 +256,5 @@ function readPositiveNumber(name: string, fallback: number): number {
 }
 
 function distanceMilesBetween(left: ScanCenter, right: ScanCenter): number {
-  const earthRadiusMiles = 3958.8;
-  const latitudeDelta = ((right.latitude - left.latitude) * Math.PI) / 180;
-  const longitudeDelta = ((right.longitude - left.longitude) * Math.PI) / 180;
-  const leftLatitude = (left.latitude * Math.PI) / 180;
-  const rightLatitude = (right.latitude * Math.PI) / 180;
-  const haversine = Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(leftLatitude) * Math.cos(rightLatitude) * Math.sin(longitudeDelta / 2) ** 2;
-  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(Math.max(0, 1 - haversine)));
+  return calculateDistanceMiles(left.latitude, left.longitude, right.latitude, right.longitude) ?? Number.POSITIVE_INFINITY;
 }
