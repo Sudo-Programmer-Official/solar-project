@@ -728,6 +728,7 @@ export interface DiscoveryScanRequest {
 
 export interface DiscoveryScanLead extends TodayLeadCard {
   distanceMiles: number | null;
+  searchCenterDistanceMiles: number | null;
   analysisStatus: "ANALYZED" | "ANALYZING" | "CACHED";
   candidateScore: number;
   routeReason: string;
@@ -1113,6 +1114,8 @@ export interface TodayLeadCard {
   latitude?: number | null;
   longitude?: number | null;
   distanceMiles?: number | null;
+  /** Straight-line distance from the active Lead Finder search center. */
+  searchCenterDistanceMiles?: number | null;
   city?: string | null;
   state?: string | null;
   postalCode?: string | null;

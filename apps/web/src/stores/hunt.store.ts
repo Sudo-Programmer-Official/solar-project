@@ -215,6 +215,24 @@ export const useHuntStore = defineStore("hunt", () => {
     selectedPropertyIds.value = [];
   }
 
+  function clearSearchResults() {
+    currentScanSession.value += 1;
+    scan.value = null;
+    scanProgress.value = null;
+    scanSignature.value = null;
+    scanResults.value = [];
+    loadedPropertyIds.value = [];
+    scanResultsCursor.value = null;
+    scanResultsHasMore.value = false;
+    scanResultsTotal.value = 0;
+    currentScanId.value = null;
+    loading.value = false;
+    error.value = null;
+    lastLatitude.value = null;
+    lastLongitude.value = null;
+    lastSwipeAction.value = null;
+  }
+
   async function runScan(
     center: { latitude: number; longitude: number },
     options: {
@@ -495,6 +513,7 @@ export const useHuntStore = defineStore("hunt", () => {
     toggleSavedRouteItem,
     clearSavedRoute,
     resetSelection,
+    clearSearchResults,
     runScan,
     loadMoreResults,
     generateRoute,

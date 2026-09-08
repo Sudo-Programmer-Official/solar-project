@@ -669,6 +669,45 @@ test("discovery debug explains why a known neighboring property was missed", asy
   assert.equal(explanation?.reason, "outside_radius");
 });
 
+test("lead finder scans stay isolated by search center and never render out-of-radius properties", async () => {
+  const repository = new InMemorySolarRepository();
+  const centerA = { latitude: 40, longitude: -79 };
+  const centerB = { latitude: 40.2, longitude: -79 };
+  const makeProperty = (id: string, address: string, latitude: number) => repository.upsertProperty({
+    id,
+    normalizedAddress: `${address}, Example, PA 16000`,
+    street: address,
+    city: "Example",
+    county: "Example",
+    state: "PA",
+    postalCode: "16000",
+    latitude,
+    longitude: -79,
+    parcelId: `${id}-parcel`,
+    municipality: "Example",
+    createdAt: new Date().toISOString(),
+  });
+
+  await makeProperty("search-a", "100 A St", 40.01);
+  await makeProperty("search-a-outside", "200 Outside St", 40.12);
+  await makeProperty("search-b", "300 B St", 40.21);
+
+  const scanA = await scanDiscovery({ latitude: centerA.latitude, longitude: centerA.longitude, radiusMiles: 5, filters: {}, limit: 50, maxGoogleSolarCalls: 0 }, repository);
+  const scanB = await scanDiscovery({ latitude: centerB.latitude, longitude: centerB.longitude, radiusMiles: 5, filters: {}, limit: 50, maxGoogleSolarCalls: 0 }, repository);
+
+  const scanAIds = new Set(scanA.results.map((lead) => lead.propertyId ?? lead.id));
+  const scanBIds = new Set(scanB.results.map((lead) => lead.propertyId ?? lead.id));
+  assert.equal(scanAIds.has("search-a"), true);
+  assert.equal(scanAIds.has("search-a-outside"), false);
+  assert.equal(scanBIds.has("search-b"), true);
+  assert.equal(scanBIds.has("search-a"), false);
+  assert.equal(scanA.results.every((lead) => (lead.searchCenterDistanceMiles ?? lead.distanceMiles ?? Infinity) <= 5.02), true);
+  assert.equal((await repository.listLeadOutcomes()).length, 0);
+
+  const outside = await getDiscoveryNeighborDebug(scanA.scanId, "search-a-outside", repository);
+  assert.equal(outside?.reason, "outside_radius");
+});
+
 test("neighbor diagnostics expose all configured radii and rejected nearby properties", async () => {
   const repository = new InMemorySolarRepository();
   const center = { latitude: 40, longitude: -79 };

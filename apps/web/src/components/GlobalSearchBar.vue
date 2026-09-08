@@ -405,6 +405,9 @@ async function searchLocation() {
       notifyError("We couldn't resolve that location.");
       return;
     }
+    // A new location starts a new search context. Clear the previous scan
+    // before navigation so old-area results cannot flash under the new label.
+    huntStore.clearSearchResults();
     query.value = resolved.formattedAddress;
     if (resolved.type === "PROPERTY" && resolved.propertyId) {
       await router.push(`/properties/${encodeURIComponent(resolved.propertyId)}`);
@@ -420,6 +423,7 @@ async function useCurrentLocation() {
   try {
     await searchStore.initializeDefaultContext(true);
     if (searchStore.context?.label) {
+      huntStore.clearSearchResults();
       query.value = searchStore.context.label;
       await findBestDoors();
       return;

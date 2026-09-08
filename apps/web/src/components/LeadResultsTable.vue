@@ -80,7 +80,7 @@
               </td>
               <td class="px-3 py-3 text-slate-700"><span class="block">{{ formatNumber(lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw) }} kW</span><span v-if="lead.capacityBand && lead.capacityBand !== 'UNKNOWN'" class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{{ lead.capacityBand.replace('_', ' ') }}</span></td>
               <td class="px-3 py-3 text-slate-700">{{ lead.confidence }}%</td>
-              <td class="px-3 py-3 text-slate-600">{{ distanceLabel(lead.distanceMiles) }}</td>
+              <td class="px-3 py-3 text-slate-600">{{ distanceLabel(lead.searchCenterDistanceMiles ?? lead.distanceMiles) }}</td>
               <td class="px-3 py-3"><span class="inline-flex max-w-full truncate rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide" :class="statusClasses(lead.outcome)">{{ formatStatus(lead.outcome) }}</span><span v-if="lead.rejectionReason" class="mt-1 block truncate text-[10px] text-rose-600" :title="lead.rejectionReason">{{ lead.rejectionReason.replaceAll('_', ' ') }}</span></td>
               <td class="px-3 py-3">
                 <div class="flex items-center gap-1.5">
@@ -132,7 +132,7 @@
         <div class="flex items-start justify-between gap-3">
           <button class="min-w-0 flex-1 text-left" type="button" @click="openLead(lead)">
             <h3 class="truncate text-base font-semibold text-slate-900">{{ leadTitle(lead) }}</h3>
-            <p class="mt-1 truncate text-sm text-slate-500">{{ cityLabel(lead) }} · {{ distanceLabel(lead.distanceMiles) }}</p>
+            <p class="mt-1 truncate text-sm text-slate-500">{{ cityLabel(lead) }} · {{ distanceLabel(lead.searchCenterDistanceMiles ?? lead.distanceMiles) }}</p>
           </button>
           <span class="shrink-0 rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">{{ lead.opportunityScore }}</span>
         </div>
@@ -340,7 +340,7 @@ function formatNumber(value: number | null | undefined) {
 }
 
 function distanceLabel(distance: number | null | undefined) {
-  return distance == null ? "--" : `${distance.toFixed(1)} mi`;
+  return distance == null ? "--" : `~${distance.toFixed(1)} mi from search center`;
 }
 
 function compareLeads(left: DiscoveryScanLead, right: DiscoveryScanLead, key: SortKey, direction: SortDirection) {

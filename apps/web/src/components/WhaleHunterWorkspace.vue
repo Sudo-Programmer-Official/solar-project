@@ -260,7 +260,7 @@
           </div>
           <div class="rounded-2xl bg-slate-50 p-3">
             <span class="text-slate-500">Distance</span>
-            <strong class="mt-1 block text-slate-900">{{ formatDistance(selectedLead?.distanceMiles) }}</strong>
+            <strong class="mt-1 block text-slate-900">{{ formatDistance(selectedLead?.searchCenterDistanceMiles ?? selectedLead?.distanceMiles) }}</strong>
           </div>
           <div class="rounded-2xl bg-slate-50 p-3">
             <span class="text-slate-500">Next action</span>
@@ -272,7 +272,7 @@
           <p class="field-label">Cluster members</p>
           <div class="mt-2 space-y-2">
             <p v-for="lead in selectedCluster.leads.slice(0, 3)" :key="lead.propertyId ?? lead.id" class="text-sm text-slate-600">
-              {{ formatLeadTitle(lead.address, lead.city, lead.state, lead.postalCode) }} · {{ formatDistance(lead.distanceMiles) }}
+              {{ formatLeadTitle(lead.address, lead.city, lead.state, lead.postalCode) }} · {{ formatDistance(lead.searchCenterDistanceMiles ?? lead.distanceMiles) }}
             </p>
           </div>
         </div>
@@ -689,6 +689,7 @@ async function searchLocation() {
       return;
     }
     resolvedLocation.value = resolved;
+    hunt.clearSearchResults();
     rememberSearch(query);
   } catch (error) {
     locationError.value = error instanceof Error && error.message === "Geocoding unavailable" ? error.message : "Geocoding unavailable";
@@ -1040,6 +1041,6 @@ function formatNumber(value?: number | null) {
 
 function formatDistance(value?: number | null) {
   if (value == null) return "Distance unknown";
-  return `${value.toFixed(1)} mi away`;
+  return `~${value.toFixed(1)} mi from search center`;
 }
 </script>

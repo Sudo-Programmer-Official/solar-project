@@ -193,6 +193,7 @@ export interface PropertyAnalysisDebugResult {
 const defaultRepository = new InMemorySolarRepository();
 const discoveryScanStore = new Map<string, DiscoveryScanProgress>();
 const routeStore = new Map<string, RoutePlan>();
+const DISCOVERY_RADIUS_TOLERANCE_MILES = 0.02;
 
 interface DiscoveryScanFailureContext {
   stage: DiscoveryScanStage;
@@ -1076,7 +1077,7 @@ export async function getDiscoveryNeighborDebug(
   const distanceMiles = property.latitude == null || property.longitude == null
     ? null
     : distanceMilesBetween(scan.center, { latitude: property.latitude, longitude: property.longitude });
-  if (distanceMiles == null || distanceMiles > scan.radiusMiles) {
+  if (distanceMiles == null || !isWithinDiscoveryRadius(distanceMiles, scan.radiusMiles)) {
     return { targetPropertyId, address, discovered: false, reason: "outside_radius", distanceMiles, checkedRadiiMeters: radiiMeters };
   }
   const propertyUse = inferPropertyUse(property, null, null);
@@ -1112,7 +1113,12 @@ export function getDiscoveryScanResultsPage(
   if (!scan) {
     return null;
   }
-  const sourceResults = dedupeDiscoveryLeads(scan.results);
+  // Defense in depth: result pages must remain scoped to this scan even if a
+  // provider or a future enrichment path returns a stale/out-of-radius lead.
+  const sourceResults = dedupeDiscoveryLeads(scan.results).filter((lead) => {
+    const distanceMiles = lead.searchCenterDistanceMiles ?? lead.distanceMiles;
+    return distanceMiles != null && isWithinDiscoveryRadius(distanceMiles, scan.radiusMiles);
+  });
   const startIndex = decodeDiscoveryCursor(cursor);
   const pageSize = Math.max(1, Math.min(limit, 50));
   const results = sourceResults.slice(startIndex, startIndex + pageSize);
@@ -1568,7 +1574,10 @@ async function runDiscoveryScanJob(
 
     const preRankingStartedAt = Date.now();
     currentPhase = "PERSISTENCE";
-    const persistedNewProperties = await persistDiscoveredProperties(discoveredProperties, repository);
+    // Cache reusable property identity/provider evidence. This is not a field
+    // lead, route item, appointment, or outcome and must not enter those
+    // business workflows without an explicit user action.
+    const cachedProperties = await cacheDiscoveredProperties(discoveredProperties, repository);
     currentPhase = "PRE_RANKING";
     const dedupeStartedAt = Date.now();
     const mergedCandidates = await mergeDiscoveryCandidates(
@@ -1576,7 +1585,7 @@ async function runDiscoveryScanJob(
       radiusMiles,
       repository,
       knownCandidates,
-      persistedNewProperties,
+      cachedProperties,
     );
     const deduplicatedCandidates = dedupeDiscoveryCandidates(mergedCandidates);
     duplicateCandidateCount = Math.max(0, mergedCandidates.length - deduplicatedCandidates.length);
@@ -1649,7 +1658,7 @@ async function runDiscoveryScanJob(
           knownProperties: knownCount,
           discoveredProperties: discoveredProperties.length,
           discoveredCount: discoveredProperties.length,
-          newProperties: persistedNewProperties.length,
+          newProperties: cachedProperties.length,
           providerCalls,
           providerCoverage: providerCalls > 0 ? "external" : "database",
           preRankingMs,
@@ -1947,7 +1956,7 @@ async function runDiscoveryScanJob(
           discoveredProperties: knownCandidates.length + discoveredProperties.length,
           discoveredCount: diagnostics.rawCandidateCount,
           knownProperties: knownCandidates.length,
-          newProperties: persistedNewProperties.length,
+          newProperties: cachedProperties.length,
           prequalifiedCandidates: filteredCandidates.length,
           solarCalls: googleSolarCalls,
           solarCallBudget: maxGoogleSolarCalls,
@@ -2300,7 +2309,7 @@ async function buildDiscoveryCandidates(
       { latitude: center.latitude, longitude: center.longitude },
       { latitude: property.latitude, longitude: property.longitude },
     );
-    if (distanceMiles > radiusMiles) {
+    if (!isWithinDiscoveryRadius(distanceMiles, radiusMiles)) {
       outsideRadius += 1;
       continue;
     }
@@ -2526,7 +2535,7 @@ function getDiscoveryNeighborAnchorLimit(): number {
   return Number.isFinite(configured) ? Math.max(0, Math.min(100, configured)) : 24;
 }
 
-async function persistDiscoveredProperties(
+async function cacheDiscoveredProperties(
   discovered: DiscoveredProperty[],
   repository: SolarRepository,
 ): Promise<Property[]> {
@@ -2636,7 +2645,7 @@ async function mergeDiscoveryCandidates(
   radiusMiles: number,
   repository: SolarRepository,
   knownCandidates: DiscoveryCandidateRecord[],
-  persistedNewProperties: Property[],
+  cachedProperties: Property[],
 ): Promise<DiscoveryCandidateRecord[]> {
   const markets = buildNeighborhoodSeedData(repository);
   const merged = new Map<string, DiscoveryCandidateRecord>();
@@ -2644,7 +2653,7 @@ async function mergeDiscoveryCandidates(
     merged.set(candidate.property.id, candidate);
   }
 
-  const newCandidates = persistedNewProperties.filter((property) => {
+  const newCandidates = cachedProperties.filter((property) => {
     if (property.latitude == null || property.longitude == null || merged.has(property.id)) {
       return false;
     }
@@ -2652,7 +2661,7 @@ async function mergeDiscoveryCandidates(
       latitude: property.latitude,
       longitude: property.longitude,
     });
-    return distanceMiles <= radiusMiles;
+    return isWithinDiscoveryRadius(distanceMiles, radiusMiles);
   });
   const metadataByPropertyId = await repository.getDiscoveryPropertyMetadata(newCandidates.map((property) => property.id));
 
@@ -2664,7 +2673,7 @@ async function mergeDiscoveryCandidates(
       latitude: property.latitude,
       longitude: property.longitude,
     });
-    if (distanceMiles > radiusMiles) {
+    if (!isWithinDiscoveryRadius(distanceMiles, radiusMiles)) {
       continue;
     }
     if (merged.has(property.id)) {
@@ -2743,7 +2752,7 @@ function classifyDiscoveredProperty(
       { latitude: input.latitude, longitude: input.longitude },
       { latitude: candidate.latitude, longitude: candidate.longitude },
     );
-    if (!Number.isFinite(distance) || distance > input.radiusMiles) {
+    if (!Number.isFinite(distance) || !isWithinDiscoveryRadius(distance, input.radiusMiles)) {
       reasons.push("outside_radius");
     }
   }
@@ -4054,6 +4063,7 @@ function mapDiscoveryResult(
     opportunityScore: scoreEligible ? lead.opportunityScore : 0,
     whaleScore: scoreEligible ? lead.whaleScore : 0,
     distanceMiles: candidate.distanceMiles,
+    searchCenterDistanceMiles: candidate.distanceMiles,
     analysisStatus,
     candidateScore: Math.round(candidate.cheapScore),
     routeReason: candidate.routeReason,
@@ -4142,6 +4152,7 @@ function buildPendingDiscoveryResult(
     isDemo: false,
     locationVerification: candidate.freshAnalysis?.locationVerification ?? undefined,
     distanceMiles: candidate.distanceMiles,
+    searchCenterDistanceMiles: candidate.distanceMiles,
     analysisStatus,
     candidateScore: useKnownScore,
     routeReason: candidate.routeReason,
@@ -6242,6 +6253,10 @@ function distanceMilesBetween(
   b: NormalizedCoordinates,
 ): number {
   return calculateDistanceMiles(a.latitude, a.longitude, b.latitude, b.longitude) ?? Number.POSITIVE_INFINITY;
+}
+
+function isWithinDiscoveryRadius(distanceMiles: number, radiusMiles: number): boolean {
+  return Number.isFinite(distanceMiles) && distanceMiles <= radiusMiles + DISCOVERY_RADIUS_TOLERANCE_MILES;
 }
 
 function resolveAnalysisDependencies(
