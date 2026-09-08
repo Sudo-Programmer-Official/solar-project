@@ -869,6 +869,7 @@ async function waitForDiscoveryScan(scanId: string): Promise<DiscoveryScanResult
     qualifiedLeadCount: current.qualifiedLeadCount,
     solarAnalyzedCount: current.solarAnalyzedCount,
     results,
+    marketMetrics: current.marketMetrics,
   };
 }
 

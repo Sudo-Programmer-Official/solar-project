@@ -15,6 +15,7 @@ import {
   createRoute,
   createDiscoveryScan,
   getDiscoveryScan,
+  getDiscoveryNeighborDebug,
   getDiscoveryScanResultsPage,
   resolveLocationQuery,
   resolveReverseLocationQuery,
@@ -341,6 +342,12 @@ export function createServer(repository?: SolarRepository, options: CreateServer
         const scan = getDiscoveryScan(scanId);
         if (!scan) {
           sendJson(res, 404, { error: "Scan not found" }, corsHeaders);
+          return;
+        }
+        const targetPropertyId = url.searchParams.get("propertyId");
+        if (targetPropertyId) {
+          const neighbor = await getDiscoveryNeighborDebug(scanId, targetPropertyId, repository);
+          sendJson(res, 200, { scan, neighbor }, corsHeaders);
           return;
         }
         sendJson(res, 200, scan, corsHeaders);

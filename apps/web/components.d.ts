@@ -24,6 +24,7 @@ declare module 'vue' {
     LeadResultsTable: typeof import('./src/components/LeadResultsTable.vue')['default']
     LoadingCard: typeof import('./src/components/LoadingCard.vue')['default']
     LocationMatchBadge: typeof import('./src/components/LocationMatchBadge.vue')['default']
+    MarketIntelligencePanel: typeof import('./src/components/MarketIntelligencePanel.vue')['default']
     MobileHeader: typeof import('./src/components/MobileHeader.vue')['default']
     NextBestAction: typeof import('./src/components/NextBestAction.vue')['default']
     OperationalSlotPicker: typeof import('./src/components/OperationalSlotPicker.vue')['default']

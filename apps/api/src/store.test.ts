@@ -6,6 +6,7 @@ import {
   analyzeProperty,
   createRoute,
   getDiscoveryScan,
+  getDiscoveryNeighborDebug,
   getDiscoveryScanResultsPage,
   getDealBrief,
   getLeadOutcomes,
@@ -606,6 +607,66 @@ test("discovery scan scales from 5 to 10 to 20 miles", async () => {
   assert.equal(scan5.candidateCount <= scan10.candidateCount, true);
   assert.equal(scan10.candidateCount <= scan20.candidateCount, true);
   assert.equal(scan20.results.length >= scan10.results.length, true);
+});
+
+test("discovery coverage is not truncated by the ranked lead limit", async () => {
+  const repository = new InMemorySolarRepository();
+  const center = { latitude: 40, longitude: -79 };
+  for (let index = 0; index < 80; index += 1) {
+    await repository.upsertProperty({
+      id: `coverage-${index}`,
+      normalizedAddress: `${100 + index} Coverage St, Example, PA 16000`,
+      street: `${100 + index} Coverage St`,
+      city: "Example",
+      county: "Example",
+      state: "PA",
+      postalCode: "16000",
+      latitude: center.latitude + (index % 20) * 0.0004,
+      longitude: center.longitude + Math.floor(index / 20) * 0.0004,
+      parcelId: `coverage-parcel-${index}`,
+      municipality: "Example",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const scan = await scanDiscovery({
+    latitude: center.latitude,
+    longitude: center.longitude,
+    radiusMiles: 5,
+    filters: {},
+    limit: 10,
+    maxGoogleSolarCalls: 0,
+  }, repository);
+  const progress = getDiscoveryScan(scan.scanId);
+
+  assert.equal(scan.results.length, 10);
+  assert.equal(scan.candidateCount >= 80, true);
+  assert.equal((scan.marketMetrics?.discoveredPropertyCount ?? 0) >= 80, true);
+  assert.deepEqual(progress?.discoveryDiagnostics?.neighborExpansion?.distancesMeters, [50, 100, 200, 300]);
+  assert.equal((progress?.discoveryDiagnostics?.coverageCellCount ?? 0) > 0, true);
+  assert.equal((progress?.discoveryDiagnostics?.remainingCellCount ?? -1) >= 0, true);
+});
+
+test("discovery debug explains why a known neighboring property was missed", async () => {
+  const repository = new InMemorySolarRepository();
+  await repository.upsertProperty({
+    id: "outside-neighbor",
+    normalizedAddress: "900 Outside Radius Rd, Example, PA 16000",
+    street: "900 Outside Radius Rd",
+    city: "Example",
+    county: "Example",
+    state: "PA",
+    postalCode: "16000",
+    latitude: 40.1,
+    longitude: -79,
+    parcelId: "outside-neighbor-parcel",
+    municipality: "Example",
+    createdAt: new Date().toISOString(),
+  });
+  const scan = await scanDiscovery({ latitude: 40, longitude: -79, radiusMiles: 5, filters: {}, limit: 10, maxGoogleSolarCalls: 0 }, repository);
+  const explanation = await getDiscoveryNeighborDebug(scan.scanId, "outside-neighbor", repository);
+  assert.equal(explanation?.discovered, false);
+  assert.equal(explanation?.reason, "outside_radius");
 });
 
 test("discovery paginates uniquely and excludes obvious commercial properties", async () => {

@@ -13,6 +13,21 @@
       <p class="mt-3 text-sm text-slate-500">
         Use the top search bar to change location and filters.
       </p>
+      <label class="mt-4 flex max-w-xs items-center justify-between gap-3 text-sm text-slate-600">
+        <span>
+          <span class="block font-semibold text-slate-800">Whale target</span>
+          <span class="block text-xs text-slate-500">A goal, never a fabricated result</span>
+        </span>
+        <input
+          v-model.number="desiredWhaleTarget"
+          class="field-control w-24 text-center"
+          type="number"
+          min="1"
+          max="250"
+          aria-label="Whale target"
+          @change="updateWhaleTarget"
+        />
+      </label>
     </section>
 
     <section v-if="showSwipeDeck" class="mt-4 md:hidden">
@@ -72,13 +87,20 @@
       </p>
     </section>
 
+    <MarketIntelligencePanel class="mt-4" :metrics="scanProgress?.marketMetrics" :diagnostics="scanProgress?.discoveryDiagnostics" />
+
     <section v-if="clusters.length > 0" class="mt-4 grid gap-3">
+      <div class="px-1">
+        <p class="field-label">POCKETS FIRST</p>
+        <p class="mt-1 text-sm text-slate-500">Start with the neighborhoods that give a setter the most doors per trip.</p>
+      </div>
       <article v-for="cluster in clusters" :key="cluster.key" class="page-surface p-4">
         <div class="flex items-start justify-between gap-3">
           <div>
-            <p class="field-label">Cluster</p>
+            <p class="field-label">Pocket {{ cluster.rank }}</p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">{{ cluster.label }}</h3>
-            <p class="mt-1 text-sm text-slate-500">{{ cluster.count }} high-priority properties in this area</p>
+            <p class="mt-1 text-sm text-slate-500">{{ cluster.count }} homes · {{ cluster.strongLeadCount }} strong · {{ cluster.whaleCount }} whales</p>
+            <p class="mt-1 text-xs text-slate-500">Field priority {{ cluster.fieldPriorityScore }} · {{ cluster.saturationPercent ?? 0 }}% untouched</p>
           </div>
           <button class="touch-target rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold tracking-[0.08em] text-slate-600 shadow-sm" @click="viewCluster(cluster.key)">
             View Cluster
@@ -279,6 +301,7 @@ import MobileHeader from "./MobileHeader.vue";
 import LeadResultsTable from "./LeadResultsTable.vue";
 import LeadCardSkeleton from "./LeadCardSkeleton.vue";
 import SwipeHuntDeck from "./SwipeHuntDeck.vue";
+import MarketIntelligencePanel from "./MarketIntelligencePanel.vue";
 import { formatSolarAnalysisProgress } from "../utils/scanProgress";
 
 const props = withDefaults(defineProps<{
@@ -307,6 +330,7 @@ const resolvingLocation = ref(false);
 const locationError = ref<string | null>(null);
 const recentSearches = ref<string[]>([]);
 const fallback = { latitude: 40.2108, longitude: -79.7665 };
+const desiredWhaleTarget = ref(hunt.desiredWhaleCount);
 
 const radii = [5, 10, 20] as const;
 const capacityOptions = [
@@ -338,8 +362,8 @@ const currentLatitude = computed(() => resolvedLocation.value?.latitude ?? hunt.
 const currentLongitude = computed(() => resolvedLocation.value?.longitude ?? hunt.lastLongitude ?? null);
 const canScan = computed(() => resolvedLocation.value != null);
 const summary = computed(() => ({
-  whales: results.value.filter((lead) => lead.whaleScore >= 60).length,
-  large: results.value.filter((lead) => (lead.maxRoofSolarCapacityKw ?? 0) >= 15).length,
+  whales: results.value.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
+  large: results.value.filter((lead) => lead.verificationStatus === "VERIFIED" && ["LARGE", "WHALE", "MEGA_WHALE"].includes(lead.capacityBand ?? "UNKNOWN")).length,
   permits: results.value.filter((lead) => lead.reasons.some((reason) => reason.toLowerCase().includes("permit"))).length,
   revisits: results.value.filter((lead) => lead.outcome === "REVISIT" || lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
 }));
@@ -417,21 +441,51 @@ const mapCenterLatitude = computed(() => currentLatitude.value ?? fallback.latit
 const mapCenterLongitude = computed(() => currentLongitude.value ?? fallback.longitude);
 
 const clusters = computed(() => {
-  const groups = new Map<string, { key: string; label: string; count: number; leads: DiscoveryScanLead[] }>();
+  const serverClusters = scanProgress.value?.clusters ?? [];
+  if (serverClusters.length > 0) {
+    return serverClusters
+      .filter((cluster) => cluster.propertyCount > 1)
+      .map((cluster, index) => {
+        const clusterLeads = results.value.filter((lead) => lead.clusterId === cluster.id);
+        return {
+          key: cluster.id,
+          rank: index + 1,
+          label: clusterLeads[0] ? clusterLabelForLead(clusterLeads[0]) : `Pocket ${index + 1}`,
+          count: cluster.propertyCount,
+          leads: clusterLeads,
+          strongLeadCount: cluster.strongLeadCount,
+          whaleCount: cluster.whaleCount,
+          fieldPriorityScore: cluster.fieldPriorityScore,
+          saturationPercent: cluster.saturation?.untouchedPercent ?? null,
+        };
+      });
+  }
+  const groups = new Map<string, { key: string; rank: number; label: string; count: number; leads: DiscoveryScanLead[]; strongLeadCount: number; whaleCount: number; fieldPriorityScore: number; saturationPercent: number | null }>();
   for (const lead of results.value) {
-    if ((lead.opportunityScore ?? 0) < 70 && (lead.whaleScore ?? 0) < 60) continue;
+    if (lead.funnelBucket !== "STRONG" && lead.funnelBucket !== "WHALE") continue;
     const key = clusterKeyForLead(lead);
     const current = groups.get(key) ?? {
       key,
+      rank: 0,
       label: clusterLabelForLead(lead),
       count: 0,
       leads: [],
+      strongLeadCount: 0,
+      whaleCount: 0,
+      fieldPriorityScore: 0,
+      saturationPercent: null,
     };
     current.count += 1;
     current.leads.push(lead);
+    current.strongLeadCount += lead.opportunityScore >= 70 ? 1 : 0;
+    current.whaleCount += lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE" ? 1 : 0;
+    current.fieldPriorityScore = Math.max(current.fieldPriorityScore, lead.fieldPriorityScore ?? 0);
     groups.set(key, current);
   }
-  return [...groups.values()].filter((cluster) => cluster.count > 1).sort((left, right) => right.count - left.count);
+  return [...groups.values()]
+    .filter((cluster) => cluster.count > 1)
+    .sort((left, right) => right.fieldPriorityScore - left.fieldPriorityScore || right.count - left.count)
+    .map((cluster, index) => ({ ...cluster, rank: index + 1 }));
 });
 
 const mapPoints = computed<PropertyVisualPoint[]>(() => {
@@ -638,6 +692,7 @@ async function runScan() {
   activeClusterKey.value = null;
   selectedPinId.value = null;
   currentView.value = "list";
+  updateWhaleTarget();
   await router.push({
     path: "/labs/lead-finder/scanning",
     query: { return: "/labs/lead-finder" },
@@ -646,6 +701,16 @@ async function runScan() {
     latitude: center.latitude,
     longitude: center.longitude,
   });
+}
+
+function updateWhaleTarget() {
+  const value = Number(desiredWhaleTarget.value);
+  if (!Number.isFinite(value)) {
+    desiredWhaleTarget.value = hunt.desiredWhaleCount;
+    return;
+  }
+  hunt.setDesiredWhaleCount(value);
+  desiredWhaleTarget.value = hunt.desiredWhaleCount;
 }
 
 async function loadMore() {

@@ -38,6 +38,7 @@ const defaultFilters: DiscoveryScanFilters = {
 
 export const useHuntStore = defineStore("hunt", () => {
   const radiusMiles = ref<5 | 10 | 20>(10);
+  const desiredWhaleCount = ref(30);
   const filters = ref<DiscoveryScanFilters>({ ...defaultFilters });
   const scan = ref<DiscoveryScanStatusResponse | null>(null);
   const scanProgress = ref<DiscoveryScanStatusResponse | null>(null);
@@ -122,6 +123,10 @@ export const useHuntStore = defineStore("hunt", () => {
 
   function setRadius(value: 5 | 10 | 20) {
     radiusMiles.value = value;
+  }
+
+  function setDesiredWhaleCount(value: number) {
+    desiredWhaleCount.value = Math.max(1, Math.min(250, Math.round(value)));
   }
 
   function setFilter<K extends keyof DiscoveryScanFilters>(key: K, value: DiscoveryScanFilters[K]) {
@@ -217,6 +222,7 @@ export const useHuntStore = defineStore("hunt", () => {
       filters?: DiscoveryScanFilters;
       limit?: number;
       maxGoogleSolarCalls?: number;
+      desiredWhaleCount?: number;
     } = {},
   ) {
     const searchStore = useSearchContextStore();
@@ -236,6 +242,7 @@ export const useHuntStore = defineStore("hunt", () => {
         filters: committedFilters,
         limit: options.limit ?? 250,
         maxGoogleSolarCalls: options.maxGoogleSolarCalls ?? 25,
+        desiredWhaleCount: options.desiredWhaleCount ?? desiredWhaleCount.value,
       });
       if (!isCurrentScanSession(sessionId)) {
         return emptyScanResult(committedRadius, center);
@@ -430,6 +437,7 @@ export const useHuntStore = defineStore("hunt", () => {
 
   return {
     radiusMiles,
+    desiredWhaleCount,
     filters,
     scan,
     scanProgress,
@@ -478,6 +486,7 @@ export const useHuntStore = defineStore("hunt", () => {
     solarAnalysisTarget,
     totalAvailable,
     setRadius,
+    setDesiredWhaleCount,
     setFilter,
     setMinCapacity,
     toggleFilter,

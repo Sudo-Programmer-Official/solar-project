@@ -81,6 +81,8 @@
       </div>
     </section>
 
+    <MarketIntelligencePanel class="mt-4" :metrics="hunt.scanProgress?.marketMetrics" :diagnostics="hunt.scanProgress?.discoveryDiagnostics" />
+
     <LeadResultsTable
       v-if="hunt.scan || hunt.isScanning"
       class="mt-4"
@@ -132,6 +134,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import MobileHeader from "../components/MobileHeader.vue";
 import LeadResultsTable from "../components/LeadResultsTable.vue";
+import MarketIntelligencePanel from "../components/MarketIntelligencePanel.vue";
 import { useHuntStore } from "../stores/hunt.store";
 import { useSearchContextStore } from "../stores/search-context.store";
 import { formatSolarAnalysisProgress } from "../utils/scanProgress";

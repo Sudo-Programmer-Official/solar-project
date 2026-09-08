@@ -25,6 +25,9 @@ import {
 import {
   InMemorySolarRepository,
   type DiscoveryPropertyMetadata,
+  type DiscoveryScanCellUpsertInput,
+  type DiscoveryScanCheckpointUpsertInput,
+  type PropertyVerificationUpsertInput,
   type PropertyDiscoveryRecord,
   type PropertyDiscoveryUpsertInput,
   type SolarAssessmentAuditRecord,
@@ -37,6 +40,7 @@ import type {
   DiscoveryClusterSummary,
   DiscoveryScanFilters,
   DiscoveryDiagnostics,
+  DiscoveryNeighborDebugResult,
   DiscoveryScanError,
   DiscoveryScanFailureCode,
   DiscoveryScanLead,
@@ -52,6 +56,8 @@ import type {
   DiscoveryScanStage,
   DiscoveryScanStatus,
   DiscoverResponse,
+  DiscoveryFunnelBucket,
+  DiscoveryMarketMetrics,
   DealBrief,
   DealStage,
   DataQualitySummary,
@@ -85,6 +91,19 @@ import type {
   PropertyVisualSignal,
   UsageProfile,
 } from "../../../packages/contracts/src/index";
+import {
+  addFunnelBucket,
+  addDiscoveryCapacityBand,
+  buildCoverageSummary,
+  buildDiscoveryCoverageCells,
+  classifyDiscoveryCapacityBand,
+  classifyMarketCandidate,
+  coverageCellKey,
+  emptyDiscoveryCapacityBandCounts,
+  emptyDiscoveryFunnelCounts,
+  emptyDiscoverySaturation,
+  emptyDiscoveryMarketMetrics,
+} from "./market-intelligence";
 import { calculateWhaleScore, type WhaleScoreResult } from "../../../packages/scoring/src/index";
 import { recommendNextBestAction } from "../../../packages/lead-intelligence/src/index";
 import {
@@ -201,6 +220,7 @@ class DiscoveryStageTimeoutError extends Error {
 }
 
 function createDiscoveryDiagnostics(center: { latitude: number; longitude: number }, radiusMiles: number): DiscoveryDiagnostics {
+  const coverageCellCount = buildDiscoveryCoverageCells(center, radiusMiles).length;
   return {
     center,
     radiusMiles,
@@ -209,7 +229,40 @@ function createDiscoveryDiagnostics(center: { latitude: number; longitude: numbe
     deduplicatedCandidateCount: 0,
     residentialCandidateCount: 0,
     prequalifiedCount: 0,
+    coverageCellCount,
+    processedCellCount: 0,
+    remainingCellCount: coverageCellCount,
+    coveragePercent: 0,
+    neighborExpansion: {
+      distancesMeters: getDiscoveryNeighborRadiiMeters(),
+      anchorPropertyCount: 0,
+      searchedAnchorCount: 0,
+      providerQueryCount: 0,
+      foundNeighborCount: 0,
+      missReasons: {},
+      warning: null,
+    },
   };
+}
+
+function createDiscoveryMarketMetrics(
+  center: { latitude: number; longitude: number },
+  radiusMiles: number,
+  desiredWhaleCount: number | null,
+): DiscoveryMarketMetrics {
+  const metrics = emptyDiscoveryMarketMetrics();
+  const cells = buildDiscoveryCoverageCells(center, radiusMiles);
+  metrics.coverage = buildCoverageSummary({
+    cellCount: cells.length,
+    source: null,
+    sourceSucceeded: false,
+    discoveredCellCount: 0,
+    verifiedCellCount: 0,
+    solarAnalyzedCellCount: 0,
+    completeCellCount: 0,
+  });
+  metrics.desiredWhaleCount = desiredWhaleCount;
+  return metrics;
 }
 
 function createDiscoveryFatalError(context: DiscoveryScanFailureContext): DiscoveryScanFatalError {
@@ -996,6 +1049,58 @@ export function getDiscoveryScan(scanId: string): DiscoveryScanStatusResponse | 
   return stripDiscoveryScanResults(scan);
 }
 
+export async function getDiscoveryNeighborDebug(
+  scanId: string,
+  targetPropertyId: string,
+  repository: SolarRepository = defaultRepository,
+): Promise<DiscoveryNeighborDebugResult | null> {
+  const scan = discoveryScanStore.get(scanId);
+  if (!scan) return null;
+  const property = await repository.getPropertyById(targetPropertyId);
+  const diagnostics = scan.discoveryDiagnostics;
+  const radiiMeters = diagnostics?.neighborExpansion?.distancesMeters ?? getDiscoveryNeighborRadiiMeters();
+  const address = property?.street ?? property?.normalizedAddress ?? null;
+  if (!property) {
+    return {
+      targetPropertyId,
+      address: null,
+      discovered: false,
+      reason: "source_not_returned",
+      distanceMiles: null,
+      checkedRadiiMeters: radiiMeters,
+    };
+  }
+
+  const distanceMiles = property.latitude == null || property.longitude == null
+    ? null
+    : distanceMilesBetween(scan.center, { latitude: property.latitude, longitude: property.longitude });
+  const discoveredIds = new Set(diagnostics?.discoveredPropertyIds ?? []);
+  if (discoveredIds.has(property.id)) {
+    return { targetPropertyId, address, discovered: true, reason: null, distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  const targetKey = discoveryKeyForProperty(property);
+  if ((diagnostics?.discoveredPropertyKeys ?? []).includes(targetKey)) {
+    return { targetPropertyId, address, discovered: false, reason: "duplicate", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  if (distanceMiles == null || distanceMiles > scan.radiusMiles) {
+    return { targetPropertyId, address, discovered: false, reason: "outside_radius", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  if ((diagnostics?.filteredPropertyIds ?? []).includes(property.id)) {
+    return { targetPropertyId, address, discovered: false, reason: "filtered_by_rule", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  const propertyUse = inferPropertyUse(property, null, null);
+  if (!isResidentialPropertyUse(propertyUse)) {
+    return { targetPropertyId, address, discovered: false, reason: "non_residential", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  if (!isSpecificPropertyAddress(address)) {
+    return { targetPropertyId, address, discovered: false, reason: "verification_failed", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  if (diagnostics?.providersAttempted.some((attempt) => attempt.error != null)) {
+    return { targetPropertyId, address, discovered: false, reason: "source_error", distanceMiles, checkedRadiiMeters: radiiMeters };
+  }
+  return { targetPropertyId, address, discovered: false, reason: "source_not_returned", distanceMiles, checkedRadiiMeters: radiiMeters };
+}
+
 export function getDiscoveryScanResultsPage(
   scanId: string,
   cursor?: string | null,
@@ -1015,13 +1120,130 @@ export function getDiscoveryScanResultsPage(
     nextCursor: nextIndex < sourceResults.length ? encodeDiscoveryCursor(nextIndex) : null,
     hasMore: nextIndex < sourceResults.length,
     totalAvailable: sourceResults.length,
-    qualifiedLeadCount: sourceResults.length,
+    qualifiedLeadCount: countQualifiedDiscoveryLeads(sourceResults),
   };
 }
 
 function stripDiscoveryScanResults(scan: DiscoveryScanProgress): DiscoveryScanStatusResponse {
   const { results: _results, ...status } = scan;
   return status;
+}
+
+async function persistDiscoveryScanCheckpoint(
+  repository: SolarRepository,
+  scan: DiscoveryScanProgress,
+): Promise<void> {
+  const input: DiscoveryScanCheckpointUpsertInput = {
+    scanId: scan.scanId,
+    status: scan.status,
+    stage: scan.stage ?? null,
+    centerLatitude: scan.center.latitude,
+    centerLongitude: scan.center.longitude,
+    radiusMiles: scan.radiusMiles,
+    checkpointJson: {
+      message: scan.message,
+      stages: scan.stages,
+      warnings: scan.warnings,
+      candidateCount: scan.candidateCount,
+      analyzedCount: scan.analyzedCount,
+      qualifiedLeadCount: scan.qualifiedLeadCount,
+      results: scan.results,
+    },
+    coverageJson: scan.marketMetrics.coverage,
+    funnelJson: scan.marketMetrics.funnel,
+    metricsJson: scan.metrics,
+    startedAt: scan.startedAt,
+    updatedAt: scan.updatedAt,
+    completedAt: scan.completedAt,
+  };
+  try {
+    await repository.upsertDiscoveryScanCheckpoint(input);
+  } catch (error) {
+    // A checkpoint must never turn an otherwise usable scan into a failed scan.
+    console.warn(JSON.stringify({ event: "discovery_scan_checkpoint_failed", scanId: scan.scanId, error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+async function persistDiscoveryScanCells(
+  repository: SolarRepository,
+  scanId: string,
+  cells: ReturnType<typeof buildDiscoveryCoverageCells>,
+  candidates: DiscoveryCandidateRecord[],
+  sourceSucceeded: boolean,
+): Promise<void> {
+  const records: DiscoveryScanCellUpsertInput[] = cells.map((cell) => {
+    const members = candidates.filter((candidate) => {
+      if (candidate.property.latitude == null || candidate.property.longitude == null) return false;
+      return coverageCellKey({ latitude: candidate.property.latitude, longitude: candidate.property.longitude }) === cell.key;
+    });
+    const verifiedCount = members.filter((candidate) => candidate.verificationStatus === "VERIFIED").length;
+    const solarAnalyzedCount = members.filter((candidate) => Boolean(candidate.freshAnalysis ?? candidate.solarAssessment)).length;
+    const status: DiscoveryScanCellUpsertInput["status"] = solarAnalyzedCount > 0 && members.every((candidate) => candidate.funnelBucket !== "PROCESSING_ERROR")
+      ? "COMPLETE"
+      : solarAnalyzedCount > 0
+        ? "SOLAR_ANALYZED"
+        : verifiedCount > 0
+          ? "VERIFIED"
+          : members.length > 0 || sourceSucceeded
+            ? "DISCOVERED"
+            : "UNSCANNED";
+    return {
+      id: stableId(`${scanId}:${cell.key}`),
+      cellKey: cell.key,
+      centerLatitude: cell.center.latitude,
+      centerLongitude: cell.center.longitude,
+      radiusMiles: cell.radiusMiles,
+      status,
+      discoveredCount: members.length,
+      verifiedCount,
+      solarAnalyzedCount,
+    };
+  });
+  try {
+    await repository.replaceDiscoveryScanCells(scanId, records);
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "discovery_scan_cells_failed", scanId, error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+async function persistPropertyVerifications(
+  repository: SolarRepository,
+  scanId: string,
+  candidates: DiscoveryCandidateRecord[],
+): Promise<void> {
+  try {
+    for (const candidate of candidates) {
+      const preciseAddress = isSpecificPropertyAddress(candidate.property.street ?? candidate.property.normalizedAddress);
+      const residential = isResidentialPropertyUse(candidate.propertyUse);
+      const coordinatePresent = candidate.property.latitude != null && candidate.property.longitude != null;
+      const status = candidate.verificationStatus;
+      const input: PropertyVerificationUpsertInput = {
+        id: stableId(`${scanId}:${candidate.property.id}:verification`),
+        scanId,
+        propertyId: candidate.property.id,
+        status,
+        verificationScore: status === "VERIFIED" ? 100 : status === "REVIEW" ? 60 : 0,
+        rejectionReason: status === "REJECTED"
+          ? !residential ? "NON_RESIDENTIAL" : !preciseAddress ? "BAD_ADDRESS" : "PROPERTY_REJECTED"
+          : status === "REVIEW"
+            ? "IMAGERY_OR_SOURCE_REVIEW_REQUIRED"
+            : null,
+        checksJson: {
+          preciseAddress,
+          residential,
+          buildingExists: residential,
+          coordinateMatchesBuilding: coordinatePresent,
+          roofExists: candidate.solarAssessment ? candidate.solarAssessment.roofAreaMeters2 != null : null,
+          imageryUsable: candidate.solarAssessment ? candidate.solarAssessment.imageryQuality != null : null,
+          duplicate: false,
+        },
+        sourceProvider: candidate.discoverySource ?? "property_record",
+      };
+      await repository.upsertPropertyVerification(input);
+    }
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "property_verification_persist_failed", scanId, error: error instanceof Error ? error.message : String(error) }));
+  }
 }
 
 function encodeDiscoveryCursor(index: number): string {
@@ -1080,6 +1302,11 @@ function createDiscoveryScanJob(scanId: string, input: DiscoveryScanInput): Disc
     center,
     filters,
     discoveryDiagnostics: createDiscoveryDiagnostics(center, radiusMiles),
+    marketMetrics: createDiscoveryMarketMetrics(
+      center,
+      radiusMiles,
+      "desiredWhaleCount" in input ? input.desiredWhaleCount ?? null : null,
+    ),
     metrics: {
       rawDiscoveredCount: 0,
       residentialCandidateCount: 0,
@@ -1152,6 +1379,8 @@ async function runDiscoveryScanJob(
   const radiusMiles = baseJob.radiusMiles;
   const limit = Math.max(1, Math.min(input.limit ?? 50, 250));
   const maxGoogleSolarCalls = Math.max(0, Math.min(input.maxGoogleSolarCalls ?? 25, 25));
+  const coverageCells = buildDiscoveryCoverageCells(center, radiusMiles);
+  const desiredWhaleCount = "desiredWhaleCount" in input ? input.desiredWhaleCount ?? null : null;
   const discoveryBudgetMs = 25_000;
   const warnings = [...baseJob.warnings];
   let geocoder: Geocoder | null = null;
@@ -1163,6 +1392,9 @@ async function runDiscoveryScanJob(
   let cheapRankingMs: number | null = null;
   let firstBatchMs: number | null = null;
   let solarEnrichmentMs: number | null = null;
+  let coverageSource: string | null = null;
+  let coverageSourceSucceeded = false;
+  let duplicateCandidateCount = 0;
   try {
     geocoder = dependencies.geocoder ?? resolveGeocoderDependency(env, dependencies);
   } catch {
@@ -1242,8 +1474,10 @@ async function runDiscoveryScanJob(
         cause: error,
       });
     }
-    const knownWithinLimit = knownCandidates.slice(0, limit);
-    const knownCount = knownWithinLimit.length;
+    // `limit` controls how many ranked leads we return, never how much of the
+    // geographic market we discover. Keeping these separate prevents a dense
+    // neighborhood from hiding the rest of the radius behind the first page.
+    const knownCount = knownCandidates.length;
     const knownKeys = new Set(knownCandidates.map((candidate) => discoveryKeyForProperty(candidate.property)));
     updateJob(
       {
@@ -1269,14 +1503,12 @@ async function runDiscoveryScanJob(
       },
     );
 
-    const additionalNeed = Math.max(0, limit - knownWithinLimit.length);
-    const discoveryLimit = Math.max(limit, limit + additionalNeed);
+    const discoveryLimit = Math.max(250, limit);
     let discoveredProperties: DiscoveredProperty[] = [];
     let providerCalls = 0;
     let coverageUnavailable = false;
 
-    const minimumCandidates = getDiscoveryMinimumCandidates();
-    const shouldQueryExternal = additionalNeed > 0 && knownCount < minimumCandidates && Date.now() - startedAt < discoveryBudgetMs;
+    const shouldQueryExternal = Date.now() - startedAt < discoveryBudgetMs;
     if (shouldQueryExternal) {
       currentPhase = "PRE_RANKING";
       const externalStartedAt = Date.now();
@@ -1294,6 +1526,13 @@ async function runDiscoveryScanJob(
         providerCalls = providerResult.providerCalls;
         discoveredProperties = providerResult.properties;
         coverageUnavailable = providerResult.coverageUnavailable;
+        coverageSource = providerResult.provider;
+        coverageSourceSucceeded = providerCalls > 0 && diagnostics.providersAttempted.some(
+          (attempt) => attempt.provider !== "existing_properties" && attempt.error == null,
+        );
+        if (!coverageSourceSucceeded) {
+          addWarning("GEOGRAPHIC_COVERAGE_PARTIAL");
+        }
         if (providerResult.failure) {
           if (providerResult.failure.code === "PROVIDER_TIMEOUT") {
             addWarning("EXTERNAL_DISCOVERY_TIMEOUT");
@@ -1337,10 +1576,28 @@ async function runDiscoveryScanJob(
       persistedNewProperties,
     );
     const deduplicatedCandidates = dedupeDiscoveryCandidates(mergedCandidates);
+    duplicateCandidateCount = Math.max(0, mergedCandidates.length - deduplicatedCandidates.length);
+    diagnostics.neighborExpansion = addNeighborhoodCounts(deduplicatedCandidates);
+    diagnostics.neighborExpansion.providerQueryCount = diagnostics.providersAttempted
+      .filter((attempt) => attempt.provider !== "existing_properties")
+      .reduce((total, attempt) => total + attempt.requestCount, 0);
+    diagnostics.discoveredPropertyIds = deduplicatedCandidates.map((candidate) => candidate.property.id);
+    diagnostics.discoveredPropertyKeys = deduplicatedCandidates.map((candidate) => discoveryKeyForProperty(candidate.property));
+    mergeNeighborMissReasons(diagnostics, diagnostics.providersAttempted);
+    updateDiscoveryCoverageDiagnostics(diagnostics, coverageCells, deduplicatedCandidates, coverageSourceSucceeded);
     dedupeMs = Date.now() - dedupeStartedAt;
     const minimumSystemKw = getMinimumSystemKw(input.filters ?? {});
     const classificationStartedAt = Date.now();
     const filteredCandidates = applyDiscoveryFilters(deduplicatedCandidates, input.filters ?? {});
+    diagnostics.filteredPropertyIds = deduplicatedCandidates
+      .filter((candidate) => !filteredCandidates.some((filtered) => filtered.property.id === candidate.property.id))
+      .map((candidate) => candidate.property.id);
+    if (diagnostics.neighborExpansion) {
+      const filteredByRule = Math.max(0, deduplicatedCandidates.length - filteredCandidates.length);
+      if (filteredByRule > 0) {
+        diagnostics.neighborExpansion.missReasons.filtered_by_rule = filteredByRule;
+      }
+    }
     classificationMs = Date.now() - classificationStartedAt;
     const solarEligibleCandidates = minimumSystemKw == null
       ? filteredCandidates
@@ -1352,10 +1609,22 @@ async function runDiscoveryScanJob(
     const cheapRankingStartedAt = Date.now();
     const rankedCandidates = clusteredCandidates.candidates.slice(0, limit);
     cheapRankingMs = Date.now() - cheapRankingStartedAt;
-    const clusters = clusteredCandidates.clusters;
+    let clusters = clusteredCandidates.clusters;
     const preRankingMs = Date.now() - preRankingStartedAt;
     diagnostics.prequalifiedCount = filteredCandidates.length;
     diagnostics.residentialCandidateCount = filteredCandidates.length;
+    const initialMarketMetrics = buildDiscoveryMarketMetrics({
+      center,
+      coverageCells,
+      coverageSource,
+      coverageSourceSucceeded,
+      candidates: deduplicatedCandidates,
+      results: [],
+      diagnostics,
+      duplicateCandidateCount,
+      densePocketCount: clusteredCandidates.clusters.filter((cluster) => cluster.propertyCount >= 4).length,
+      desiredWhaleCount,
+    });
 
     currentPhase = "SOLAR_ANALYSIS";
     updateJob(
@@ -1365,6 +1634,7 @@ async function runDiscoveryScanJob(
         message: "Analyzing top solar opportunities",
         clusters,
         discoveryDiagnostics: diagnostics,
+        marketMetrics: initialMarketMetrics,
         metrics: {
           rawDiscoveredCount: diagnostics.rawCandidateCount,
           residentialCandidateCount: filteredCandidates.length,
@@ -1395,6 +1665,9 @@ async function runDiscoveryScanJob(
         updatedAt: new Date().toISOString(),
       },
     );
+    await persistDiscoveryScanCheckpoint(repository, discoveryScanStore.get(scanId) ?? baseJob);
+    await persistDiscoveryScanCells(repository, scanId, coverageCells, deduplicatedCandidates, coverageSourceSucceeded);
+    await persistPropertyVerifications(repository, scanId, deduplicatedCandidates);
 
     let analyzedCount = 0;
     let googleSolarCalls = 0;
@@ -1424,7 +1697,7 @@ async function runDiscoveryScanJob(
           analyzedCount,
           metrics: {
             solarAnalyzedCount: analyzedCount,
-            qualifiedLeadCount: results.length,
+            qualifiedLeadCount: countQualifiedDiscoveryLeads(results),
             renderedLeadCount: results.length,
             resultsFound: results.length,
             firstBatchMs,
@@ -1439,6 +1712,7 @@ async function runDiscoveryScanJob(
           updatedAt: new Date().toISOString(),
         },
       );
+      await persistDiscoveryScanCheckpoint(repository, discoveryScanStore.get(scanId) ?? baseJob);
     }
 
     const solarEnrichmentStartedAt = Date.now();
@@ -1472,6 +1746,16 @@ async function runDiscoveryScanJob(
             dependencies,
           );
           nextLead = mapDiscoveryResult(analyzed, candidate, "ANALYZED");
+          candidate.freshAnalysis = analyzed;
+          candidate.solarAssessment = analyzed.solarAssessment;
+          candidate.opportunityAssessment = analyzed.opportunityAssessment;
+          candidate.maxRoofSolarCapacityKw = analyzed.maxRoofSolarCapacityKw;
+          candidate.confirmedAnnualUsageKwh = analyzed.confirmedAnnualUsageKwh;
+          candidate.estimatedEnergyNeedKw = analyzed.estimatedEnergyNeedKw;
+          candidate.verificationStatus = verificationStatusAfterSolarAnalysis(candidate, analyzed);
+          candidate.rejectionReason = discoveryVerificationRejectionReason(candidate.verificationStatus, candidate.property, candidate.propertyUse);
+          candidate.capacityBand = classifyDiscoveryCapacityBand(candidate.maxRoofSolarCapacityKw);
+          candidate.signals = analyzed.signals.map((signal) => signal.signalType.replaceAll("_", " "));
           analyzedCount += 1;
         } catch (error) {
           const warning = classifySolarAnalysisFailure(
@@ -1486,6 +1770,9 @@ async function runDiscoveryScanJob(
       }
 
       if (!nextLead && hasCachedAssessment) {
+        candidate.verificationStatus = inferDiscoveryVerificationStatus(candidate.property, candidate.propertyUse, candidate.solarAssessment);
+        candidate.rejectionReason = discoveryVerificationRejectionReason(candidate.verificationStatus, candidate.property, candidate.propertyUse);
+        candidate.capacityBand = classifyDiscoveryCapacityBand(candidate.maxRoofSolarCapacityKw);
         nextLead = buildPendingDiscoveryResult(candidate, nextAction, "CACHED");
         if (!isInitialBatch) {
           analyzedCount += 1;
@@ -1493,6 +1780,19 @@ async function runDiscoveryScanJob(
       } else if (!nextLead) {
         nextLead = buildPendingDiscoveryResult(candidate, nextAction);
       }
+
+      const currentMarketMetrics = buildDiscoveryMarketMetrics({
+        center,
+        coverageCells,
+        coverageSource,
+        coverageSourceSucceeded,
+        candidates: deduplicatedCandidates,
+        results,
+        diagnostics,
+        duplicateCandidateCount,
+        densePocketCount: clusters.filter((cluster) => cluster.propertyCount >= 4).length,
+        desiredWhaleCount,
+      });
 
       if (minimumSystemKw != null) {
         const leadCapacity = nextLead?.maxRoofSolarCapacityKw ?? nextLead?.maxSystemKw ?? null;
@@ -1506,13 +1806,14 @@ async function runDiscoveryScanJob(
                 solarAnalyzedCount: analyzedCount,
                 solarCallBudget: maxGoogleSolarCalls,
                 resultsFound: results.length,
-                qualifiedLeadCount: results.length,
+                qualifiedLeadCount: countQualifiedDiscoveryLeads(results),
                 renderedLeadCount: results.length,
                 solarCalls: googleSolarCalls,
                 estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
                 largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
-                whaleCandidates: results.filter((lead) => lead.whaleScore >= 60).length,
+                whaleCandidates: results.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
               },
+              marketMetrics: currentMarketMetrics,
               estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
             },
             {
@@ -1535,17 +1836,18 @@ async function runDiscoveryScanJob(
           results,
           analyzedCount,
           googleSolarCalls,
+          marketMetrics: currentMarketMetrics,
           estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
           metrics: {
             solarAnalyzedCount: analyzedCount,
             solarCallBudget: maxGoogleSolarCalls,
             resultsFound: results.length,
-            qualifiedLeadCount: results.length,
+            qualifiedLeadCount: countQualifiedDiscoveryLeads(results),
             renderedLeadCount: results.length,
             solarCalls: googleSolarCalls,
             estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
             largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
-            whaleCandidates: results.filter((lead) => lead.whaleScore >= 60).length,
+            whaleCandidates: results.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
           },
         },
         {
@@ -1562,18 +1864,46 @@ async function runDiscoveryScanJob(
     solarEnrichmentMs = Date.now() - solarEnrichmentStartedAt;
     const totalScanMs = Date.now() - startedAt;
     const finalRankingStartedAt = Date.now();
+    const finalClusteredCandidates = buildDiscoveryClusters(solarEligibleCandidates, center);
+    clusters = finalClusteredCandidates.clusters;
+    const finalCandidateById = new Map(finalClusteredCandidates.candidates.map((candidate) => [candidate.property.id, candidate]));
+    for (const lead of results) {
+      const candidate = finalCandidateById.get(lead.propertyId ?? lead.id);
+      if (!candidate) continue;
+      lead.clusterId = candidate.clusterId;
+      lead.fieldEfficiencyScore = candidate.fieldEfficiencyScore;
+      lead.fieldPriorityScore = candidate.fieldPriorityScore;
+      lead.propertyOpportunityScore = Math.round(propertyOpportunityScore(candidate));
+      lead.solarOpportunityScore = Math.round(solarOpportunityScore(candidate));
+      lead.verificationStatus = candidate.verificationStatus;
+      lead.rejectionReason = candidate.rejectionReason;
+      lead.capacityBand = candidate.capacityBand;
+    }
     const allProvidersFailed = diagnostics.providersAttempted.length > 0 && diagnostics.providersAttempted.every((attempt) => attempt.error != null);
+    const geographicCoverageIncomplete = coverageCells.length > 0 && !coverageSourceSucceeded;
     currentPhase = "FINAL_RANKING";
     const finalStatus: DiscoveryScanStatus =
       allProvidersFailed && results.length === 0 && knownCount === 0
         ? "DISCOVERY_FAILED"
         : coverageUnavailable && results.length === 0
           ? "DATA_COVERAGE_UNAVAILABLE"
-          : warnings.length > 0
+          : warnings.length > 0 || geographicCoverageIncomplete
             ? "PARTIAL"
           : "COMPLETE";
     const uniqueResults = dedupeDiscoveryLeads(results);
     const finalRankingMs = Date.now() - finalRankingStartedAt;
+    const finalMarketMetrics = buildDiscoveryMarketMetrics({
+      center,
+      coverageCells,
+      coverageSource,
+      coverageSourceSucceeded,
+      candidates: deduplicatedCandidates,
+      results: uniqueResults,
+      diagnostics,
+      duplicateCandidateCount,
+      densePocketCount: clusters.filter((cluster) => cluster.propertyCount >= 4).length,
+      desiredWhaleCount,
+    });
     const finalMessage =
       finalStatus === "DISCOVERY_FAILED"
         ? "We could not complete this scan."
@@ -1599,8 +1929,9 @@ async function runDiscoveryScanJob(
         warnings: [...warnings],
         clusters,
         discoveryDiagnostics: diagnostics,
+        marketMetrics: finalMarketMetrics,
         propertiesFound: filteredCandidates.length,
-        qualifiedLeadCount: uniqueResults.length,
+        qualifiedLeadCount: countQualifiedDiscoveryLeads(uniqueResults),
         solarAnalyzedCount: analyzedCount,
         metrics: {
           rawDiscoveredCount: diagnostics.rawCandidateCount,
@@ -1608,7 +1939,7 @@ async function runDiscoveryScanJob(
           prequalifiedCount: filteredCandidates.length,
           solarEligibleCount: rankedCandidates.length,
           solarAnalyzedCount: analyzedCount,
-          qualifiedLeadCount: uniqueResults.length,
+          qualifiedLeadCount: countQualifiedDiscoveryLeads(uniqueResults),
           renderedLeadCount: uniqueResults.length,
           discoveredProperties: knownCandidates.length + discoveredProperties.length,
           discoveredCount: diagnostics.rawCandidateCount,
@@ -1618,7 +1949,7 @@ async function runDiscoveryScanJob(
           solarCalls: googleSolarCalls,
           solarCallBudget: maxGoogleSolarCalls,
           largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
-          whaleCandidates: results.filter((lead) => lead.whaleScore >= 60).length,
+          whaleCandidates: results.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
           resultsFound: uniqueResults.length,
           estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
           providerCalls,
@@ -1656,14 +1987,15 @@ async function runDiscoveryScanJob(
       analyzedCount,
       candidateCount: filteredCandidates.length,
       propertiesFound: filteredCandidates.length,
-      qualifiedLeadCount: uniqueResults.length,
+      qualifiedLeadCount: countQualifiedDiscoveryLeads(uniqueResults),
       solarAnalyzedCount: analyzedCount,
       clusters,
+      marketMetrics: finalMarketMetrics,
       message: uniqueResults.length > 0 ? `Built ${uniqueResults.length} leads` : finalMessage,
       metrics: {
         ...finalJob.metrics,
         resultsFound: uniqueResults.length,
-        qualifiedLeadCount: uniqueResults.length,
+        qualifiedLeadCount: countQualifiedDiscoveryLeads(uniqueResults),
         renderedLeadCount: uniqueResults.length,
         solarAnalyzedCount: analyzedCount,
         solarAnalysisMs,
@@ -1680,6 +2012,9 @@ async function runDiscoveryScanJob(
       },
     };
     discoveryScanStore.set(scanId, dedupedJob);
+    await persistDiscoveryScanCheckpoint(repository, dedupedJob);
+    await persistDiscoveryScanCells(repository, scanId, coverageCells, deduplicatedCandidates, coverageSourceSucceeded);
+    await persistPropertyVerifications(repository, scanId, deduplicatedCandidates);
     return dedupedJob;
   } catch (error) {
     const failureContext = isDiscoveryFatalError(error)
@@ -1763,6 +2098,13 @@ function dedupeDiscoveryLeads(results: DiscoveryScanLead[]): DiscoveryScanLead[]
   return deduped;
 }
 
+function countQualifiedDiscoveryLeads(results: DiscoveryScanLead[]): number {
+  return results.filter((lead) =>
+    lead.verificationStatus === "VERIFIED" &&
+    (lead.funnelBucket === "VIABLE" || lead.funnelBucket === "STRONG" || lead.funnelBucket === "WHALE")
+  ).length;
+}
+
 function dedupeDiscoveryCandidates(candidates: DiscoveryCandidateRecord[]): DiscoveryCandidateRecord[] {
   const deduped: DiscoveryCandidateRecord[] = [];
   for (const candidate of candidates) {
@@ -1834,6 +2176,15 @@ interface DiscoveryCandidateRecord {
   clusterId: string | null;
   fieldEfficiencyScore: number;
   fieldPriorityScore: number;
+  verificationStatus: "VERIFIED" | "REVIEW" | "REJECTED" | "UNKNOWN";
+  rejectionReason: string | null;
+  capacityBand: DiscoveryScanLead["capacityBand"];
+  funnelBucket?: DiscoveryFunnelBucket;
+  nearbyPropertyCount: number;
+  nearbyVerifiedCount: number;
+  nearbyStrongCount: number;
+  nearbyWhaleCount: number;
+  nearbyCountsByRadius: Record<string, number>;
 }
 
 interface RouteCandidateRecord {
@@ -1874,6 +2225,7 @@ function buildDiscoveryCandidateRecordLite(
     usageProfile: null,
     maxRoofSolarCapacityKw: estimatedCapacity,
   });
+  const verificationStatus = inferDiscoveryVerificationStatus(property, propertyUse, null);
   return {
     property,
     distanceMiles,
@@ -1898,6 +2250,14 @@ function buildDiscoveryCandidateRecordLite(
     clusterId: null,
     fieldEfficiencyScore: 0,
     fieldPriorityScore: Math.round(cheapScore),
+    verificationStatus,
+    rejectionReason: discoveryVerificationRejectionReason(verificationStatus, property, propertyUse),
+    capacityBand: classifyDiscoveryCapacityBand(estimatedCapacity),
+    nearbyPropertyCount: 0,
+    nearbyVerifiedCount: 0,
+    nearbyStrongCount: 0,
+    nearbyWhaleCount: 0,
+    nearbyCountsByRadius: {},
   };
 }
 
@@ -2032,12 +2392,14 @@ async function discoverExternalProperties(
     };
   }
 
-  const minimumCandidates = getDiscoveryMinimumCandidates();
   let providerCalls = 0;
   let acceptedProvider: string | null = null;
   let rawCandidateCount = 0;
   let deduplicatedCandidateCount = 0;
   let residentialCandidateCount = 0;
+  const existingRawCandidateCount = diagnostics?.rawCandidateCount ?? 0;
+  const existingDeduplicatedCandidateCount = diagnostics?.deduplicatedCandidateCount ?? 0;
+  const existingResidentialCandidateCount = diagnostics?.residentialCandidateCount ?? 0;
   const acceptedKeys = new Set(existingKeys);
   const discovered: DiscoveredProperty[] = [];
   let lastProviderError: unknown = null;
@@ -2056,27 +2418,36 @@ async function discoverExternalProperties(
     };
     const startedAt = Date.now();
     providerCalls += 1;
-    const localRadiusMiles = getDiscoveryClusterRadiusMeters() / 1609.344;
-    const providerInputs = provider.source === "openstreetmap_overpass" && anchorPoints.length > 0
-      ? anchorPoints.slice(0, 3).map((anchor) => ({
+    const localRadiusMiles = Math.max(getDiscoveryNeighborRadiiMeters().at(-1) ?? 300, 300) / 1609.344;
+    // Always query the complete requested radius first. Anchor queries are a
+    // second pass for dense residential surroundings and must never replace
+    // the geographic coverage query.
+    const providerInputs = [{
+      latitude: input.latitude,
+      longitude: input.longitude,
+      radiusMiles: input.radiusMiles,
+      limit: input.limit,
+    }, ...(provider.source === "openstreetmap_overpass"
+      ? anchorPoints.slice(0, getDiscoveryNeighborAnchorLimit()).map((anchor) => ({
           latitude: anchor.latitude,
           longitude: anchor.longitude,
           radiusMiles: localRadiusMiles,
           limit: Math.max(20, Math.ceil((input.limit ?? 40) / 3)),
         }))
-      : [{
-          latitude: input.latitude,
-          longitude: input.longitude,
-          radiusMiles: input.radiusMiles,
-          limit: input.limit,
-        }];
+      : [])];
     attempt.requestCount = providerInputs.length;
     const responses = await Promise.allSettled(providerInputs.map((providerInput) => provider.discover(providerInput)));
-    for (const response of responses) {
+    for (let responseIndex = 0; responseIndex < responses.length; responseIndex += 1) {
+      const response = responses[responseIndex];
       if (response.status === "rejected") {
-        attempt.error = response.reason instanceof PropertyDiscoveryTimeoutError ? "Provider timeout" : "Provider discovery failed";
-        lastProviderError = response.reason;
-        lastProviderSource = provider.source;
+        if (responseIndex === 0 || provider.source !== "openstreetmap_overpass") {
+          attempt.error = response.reason instanceof PropertyDiscoveryTimeoutError ? "Provider timeout" : "Provider discovery failed";
+        }
+        attempt.rejectionReasons.source_error = (attempt.rejectionReasons.source_error ?? 0) + 1;
+        if (responseIndex === 0 || lastProviderError == null) {
+          lastProviderError = response.reason;
+          lastProviderSource = provider.source;
+        }
         continue;
       }
       const rawResults = response.value;
@@ -2110,13 +2481,10 @@ async function discoverExternalProperties(
     attempt.durationMs = Date.now() - startedAt;
     if (diagnostics) {
       diagnostics.providersAttempted.push(attempt);
-      diagnostics.rawCandidateCount = rawCandidateCount;
-      diagnostics.deduplicatedCandidateCount = deduplicatedCandidateCount;
-      diagnostics.residentialCandidateCount = residentialCandidateCount;
-      diagnostics.prequalifiedCount = deduplicatedCandidateCount;
-    }
-    if (knownCount + deduplicatedCandidateCount >= minimumCandidates) {
-      break;
+      diagnostics.rawCandidateCount = existingRawCandidateCount + rawCandidateCount;
+      diagnostics.deduplicatedCandidateCount = existingDeduplicatedCandidateCount + deduplicatedCandidateCount;
+      diagnostics.residentialCandidateCount = existingResidentialCandidateCount + residentialCandidateCount;
+      diagnostics.prequalifiedCount = diagnostics.deduplicatedCandidateCount;
     }
   }
 
@@ -2126,10 +2494,10 @@ async function discoverExternalProperties(
       ? classifyDiscoveryProviderFailure(lastProviderError, lastProviderSource ?? acceptedProvider ?? eligibleProviders[0]?.source ?? null)
       : null;
   if (diagnostics) {
-    diagnostics.rawCandidateCount = rawCandidateCount;
-    diagnostics.deduplicatedCandidateCount = deduplicatedCandidateCount;
-    diagnostics.residentialCandidateCount = residentialCandidateCount;
-    diagnostics.prequalifiedCount = deduplicatedCandidateCount;
+    diagnostics.rawCandidateCount = existingRawCandidateCount + rawCandidateCount;
+    diagnostics.deduplicatedCandidateCount = existingDeduplicatedCandidateCount + deduplicatedCandidateCount;
+    diagnostics.residentialCandidateCount = existingResidentialCandidateCount + residentialCandidateCount;
+    diagnostics.prequalifiedCount = diagnostics.deduplicatedCandidateCount;
   }
   return {
     providerCalls,
@@ -2142,13 +2510,18 @@ async function discoverExternalProperties(
 
 function selectDiscoveryAnchors(candidates: DiscoveryCandidateRecord[]): Array<{ latitude: number; longitude: number }> {
   return candidates
-    .filter((candidate) => isStrongDiscoveryCandidate(candidate) && candidate.property.latitude != null && candidate.property.longitude != null)
-    .sort((left, right) => propertyOpportunityScore(right) - propertyOpportunityScore(left))
-    .slice(0, 3)
+    .filter((candidate) => candidate.property.latitude != null && candidate.property.longitude != null)
+    .sort((left, right) => right.cheapScore - left.cheapScore)
+    .slice(0, getDiscoveryNeighborAnchorLimit())
     .map((candidate) => ({
       latitude: candidate.property.latitude ?? 0,
       longitude: candidate.property.longitude ?? 0,
     }));
+}
+
+function getDiscoveryNeighborAnchorLimit(): number {
+  const configured = Number.parseInt(process.env.DISCOVERY_NEIGHBOR_ANCHOR_LIMIT ?? "", 10);
+  return Number.isFinite(configured) ? Math.max(0, Math.min(100, configured)) : 24;
 }
 
 async function persistDiscoveredProperties(
@@ -2470,11 +2843,6 @@ function isInstitutionalAddress(address: string): boolean {
 
 function isMultiFamilyAddress(address: string): boolean {
   return /\b(apartment|apartments|condo|condominium|duplex|triplex|fourplex|townhome|townhouse|multi-family|multi family)\b/i.test(address);
-}
-
-function getDiscoveryMinimumCandidates(): number {
-  const configured = Number.parseInt(process.env.DISCOVERY_MIN_CANDIDATES ?? "", 10);
-  return Number.isFinite(configured) && configured > 0 ? configured : 50;
 }
 
 function extractCityFromAddress(address?: string): string | null {
@@ -2991,6 +3359,7 @@ function buildDiscoveryCandidateRecord(
     usageProfile,
     maxRoofSolarCapacityKw,
   });
+  const verificationStatus = inferDiscoveryVerificationStatus(property, propertyUse, solarAssessment);
 
   return {
     property,
@@ -3016,6 +3385,14 @@ function buildDiscoveryCandidateRecord(
     clusterId: null,
     fieldEfficiencyScore: 0,
     fieldPriorityScore: Math.round(cheapScore),
+    verificationStatus,
+    rejectionReason: discoveryVerificationRejectionReason(verificationStatus, property, propertyUse),
+    capacityBand: classifyDiscoveryCapacityBand(maxRoofSolarCapacityKw),
+    nearbyPropertyCount: 0,
+    nearbyVerifiedCount: 0,
+    nearbyStrongCount: 0,
+    nearbyWhaleCount: 0,
+    nearbyCountsByRadius: {},
   };
 }
 
@@ -3029,6 +3406,318 @@ function emptyDiscoveryPropertyMetadata(): DiscoveryPropertyMetadata {
     opportunityAssessment: null,
     solarAssessment: null,
   };
+}
+
+function inferDiscoveryVerificationStatus(
+  property: Property,
+  propertyUse: DiscoveryCandidateRecord["propertyUse"],
+  solarAssessment: SolarAssessment | null = null,
+): DiscoveryCandidateRecord["verificationStatus"] {
+  if (!isResidentialPropertyUse(propertyUse)) return "REJECTED";
+  if (property.latitude == null || property.longitude == null) return "UNKNOWN";
+  if (!isSpecificPropertyAddress(property.street ?? property.normalizedAddress)) return "REVIEW";
+  if (solarAssessment == null || solarAssessment.imageryQuality == null || solarAssessment.roofAreaMeters2 == null) return "REVIEW";
+  return "VERIFIED";
+}
+
+function discoveryVerificationRejectionReason(
+  status: DiscoveryCandidateRecord["verificationStatus"],
+  property: Property,
+  propertyUse: DiscoveryCandidateRecord["propertyUse"],
+): string | null {
+  if (status === "REJECTED" && !isResidentialPropertyUse(propertyUse)) return "NON_RESIDENTIAL";
+  if (status === "UNKNOWN" && (property.latitude == null || property.longitude == null)) return "MISSING_GEOMETRY";
+  if (status === "REVIEW" && !isSpecificPropertyAddress(property.street ?? property.normalizedAddress)) return "BAD_ADDRESS";
+  if (status === "REVIEW") return "IMAGERY_OR_SOURCE_REVIEW_REQUIRED";
+  return null;
+}
+
+function verificationStatusAfterSolarAnalysis(
+  candidate: DiscoveryCandidateRecord,
+  analysis: AnalyzeResult,
+): DiscoveryCandidateRecord["verificationStatus"] {
+  if (candidate.verificationStatus === "REJECTED") return "REJECTED";
+  if (!isSpecificPropertyAddress(candidate.property.street ?? candidate.property.normalizedAddress)) return "REVIEW";
+  if (analysis.locationVerification.status === "MISMATCH") return "REJECTED";
+  if (analysis.solarAssessment.imageryQuality == null || analysis.solarAssessment.roofAreaMeters2 == null) return "REVIEW";
+  return "VERIFIED";
+}
+
+function addNeighborhoodCounts(candidates: DiscoveryCandidateRecord[]): NonNullable<DiscoveryDiagnostics["neighborExpansion"]> {
+  const radiiMeters = getDiscoveryNeighborRadiiMeters();
+  let foundNeighborCount = 0;
+  for (const candidate of candidates) {
+    if (candidate.property.latitude == null || candidate.property.longitude == null) continue;
+    const point = { latitude: candidate.property.latitude, longitude: candidate.property.longitude };
+    const neighborsByRadius = Object.fromEntries(radiiMeters.map((radiusMeters) => [String(radiusMeters), candidates.filter((other) => {
+      if (other.property.id === candidate.property.id || other.property.latitude == null || other.property.longitude == null) return false;
+      return (distanceMeters(point, { latitude: other.property.latitude, longitude: other.property.longitude }) ?? Number.POSITIVE_INFINITY) <= radiusMeters;
+    }).length]));
+    candidate.nearbyCountsByRadius = neighborsByRadius;
+    const maxRadius = radiiMeters[radiiMeters.length - 1] ?? 300;
+    const neighbors = candidates.filter((other) => {
+      if (other.property.id === candidate.property.id || other.property.latitude == null || other.property.longitude == null) return false;
+      return (distanceMeters(point, { latitude: other.property.latitude, longitude: other.property.longitude }) ?? Number.POSITIVE_INFINITY) <= maxRadius;
+    });
+    candidate.nearbyPropertyCount = neighbors.length;
+    candidate.nearbyVerifiedCount = neighbors.filter((other) => other.verificationStatus === "VERIFIED").length;
+    candidate.nearbyStrongCount = neighbors.filter((other) => propertyOpportunityScore(other) >= 70).length;
+    candidate.nearbyWhaleCount = neighbors.filter((other) => (other.opportunityAssessment?.whaleScore ?? 0) >= 60).length;
+    if (neighbors.length > 0) foundNeighborCount += 1;
+  }
+  const searchableAnchors = candidates.filter((candidate) => candidate.property.latitude != null && candidate.property.longitude != null).length;
+  return {
+    distancesMeters: radiiMeters,
+    anchorPropertyCount: candidates.length,
+    searchedAnchorCount: searchableAnchors,
+    providerQueryCount: 0,
+    foundNeighborCount,
+    missReasons: searchableAnchors > foundNeighborCount ? { source_not_returned: searchableAnchors - foundNeighborCount } : {},
+    warning: searchableAnchors > 0 && foundNeighborCount === 0 ? "No nearby properties were returned for the configured neighbor radii." : null,
+  };
+}
+
+function getDiscoveryNeighborRadiiMeters(): number[] {
+  const configured = process.env.DISCOVERY_NEIGHBOR_RADII_METERS
+    ?.split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const radii = configured && configured.length > 0 ? configured : [50, 100, 200, 300];
+  return [...new Set(radii.map((value) => Math.round(value)))].sort((left, right) => left - right).slice(0, 8);
+}
+
+function mergeNeighborMissReasons(
+  diagnostics: DiscoveryDiagnostics,
+  attempts: DiscoveryProviderAttemptDiagnostics[],
+): void {
+  const expansion = diagnostics.neighborExpansion;
+  if (!expansion) return;
+  for (const attempt of attempts) {
+    for (const [reason, count] of Object.entries(attempt.rejectionReasons)) {
+      const mapped: keyof NonNullable<DiscoveryDiagnostics["neighborExpansion"]>["missReasons"] | null =
+        reason === "duplicate" ? "duplicate"
+          : reason === "outside_radius" ? "outside_radius"
+            : ["commercial", "industrial", "other_non_residential", "vacant", "unknown"].includes(reason) ? "non_residential"
+              : reason === "source_error" ? "source_error"
+                : reason === "missing_geometry" ? "verification_failed"
+                  : null;
+      if (!mapped) continue;
+      expansion.missReasons[mapped] = (expansion.missReasons[mapped] ?? 0) + count;
+    }
+  }
+}
+
+function buildDiscoveryMarketMetrics(input: {
+  center: { latitude: number; longitude: number };
+  coverageCells: ReturnType<typeof buildDiscoveryCoverageCells>;
+  coverageSource: string | null;
+  coverageSourceSucceeded: boolean;
+  candidates: DiscoveryCandidateRecord[];
+  results: DiscoveryScanLead[];
+  diagnostics: DiscoveryDiagnostics;
+  duplicateCandidateCount: number;
+  densePocketCount: number;
+  desiredWhaleCount: number | null;
+}): DiscoveryMarketMetrics {
+  const funnel = emptyDiscoveryFunnelCounts();
+  const resultByPropertyId = new Map(input.results.map((lead) => [lead.propertyId ?? lead.id, lead]));
+  const verifiedCellKeys = new Set<string>();
+  const solarAnalyzedCellKeys = new Set<string>();
+  const completeCellKeys = new Set<string>();
+  let verifiedPropertyCount = 0;
+  let existingSolarCount = 0;
+  let solarViableCount = 0;
+  let strongLeadCount = 0;
+  let whaleCount = 0;
+  const capacityBands = emptyDiscoveryCapacityBandCounts();
+  const saturation = emptyDiscoverySaturation();
+  let propertiesWithNeighbors = 0;
+  let nearbyPropertyCount = 0;
+  let nearbyVerifiedCount = 0;
+  let nearbyStrongCount = 0;
+  let nearbyWhaleCount = 0;
+
+  for (const candidate of input.candidates) {
+    const lead = resultByPropertyId.get(candidate.property.id);
+    const solarAssessment = candidate.freshAnalysis?.solarAssessment ?? candidate.solarAssessment;
+    const solarScore = solarAssessment?.solarFitScore ?? null;
+    const existingSolarStatus = solarAssessment?.existingSolarStatus ?? "UNKNOWN";
+    const bucket = classifyMarketCandidate({
+      propertyUse: candidate.propertyUse,
+      address: candidate.property.street ?? candidate.property.normalizedAddress,
+      verificationStatus: candidate.verificationStatus,
+      existingSolarStatus,
+      solarScore,
+      whaleScore: lead?.whaleScore ?? candidate.opportunityAssessment?.whaleScore ?? null,
+      strongScore: lead?.opportunityScore ?? propertyOpportunityScore(candidate),
+      capacityKw: candidate.maxRoofSolarCapacityKw,
+    });
+    candidate.funnelBucket = bucket;
+    if (lead) {
+      lead.verificationStatus = candidate.verificationStatus;
+      lead.funnelBucket = bucket;
+      lead.solarScore = solarScore ?? undefined;
+      lead.capacityBand = candidate.capacityBand;
+      lead.rejectionReason = candidate.rejectionReason;
+      lead.nearbyPropertyCount = candidate.nearbyPropertyCount;
+      lead.nearbyVerifiedCount = candidate.nearbyVerifiedCount;
+      lead.nearbyStrongCount = candidate.nearbyStrongCount;
+      lead.nearbyWhaleCount = candidate.nearbyWhaleCount;
+    }
+    addFunnelBucket(funnel, bucket);
+    if (candidate.verificationStatus === "VERIFIED") verifiedPropertyCount += 1;
+    if (existingSolarStatus === "DETECTED") existingSolarCount += 1;
+    if (candidate.verificationStatus === "VERIFIED" && existingSolarStatus !== "DETECTED" && solarScore != null && solarScore >= 45) {
+      solarViableCount += 1;
+    }
+    if (bucket === "STRONG" || bucket === "WHALE") strongLeadCount += 1;
+    if (bucket === "WHALE") whaleCount += 1;
+    addDiscoveryCapacityBand(capacityBands, classifyDiscoveryCapacityBand(candidate.maxRoofSolarCapacityKw));
+    saturation.discovered += 1;
+    if (candidate.verificationStatus === "VERIFIED" && ["VIABLE", "STRONG", "WHALE"].includes(bucket)) {
+      saturation.qualified += 1;
+    }
+    if (isKnockedOutcome(candidate.leadOutcome?.outcome)) saturation.knocked += 1;
+    if (isAppointmentOutcome(candidate.leadOutcome?.outcome)) saturation.appointments += 1;
+    if (isClosedOutcome(candidate.leadOutcome?.outcome)) saturation.closed += 1;
+    if (candidate.nearbyPropertyCount > 0) propertiesWithNeighbors += 1;
+    nearbyPropertyCount += candidate.nearbyPropertyCount;
+    nearbyVerifiedCount += candidate.nearbyVerifiedCount;
+    nearbyStrongCount += candidate.nearbyStrongCount;
+    nearbyWhaleCount += candidate.nearbyWhaleCount;
+
+    if (candidate.property.latitude != null && candidate.property.longitude != null) {
+      const cellKey = coverageCellKey({ latitude: candidate.property.latitude, longitude: candidate.property.longitude });
+      if (candidate.verificationStatus === "VERIFIED") verifiedCellKeys.add(cellKey);
+      if (solarAssessment) solarAnalyzedCellKeys.add(cellKey);
+      if (solarAssessment && bucket !== "PROCESSING_ERROR" && bucket !== "UNVERIFIED") completeCellKeys.add(cellKey);
+    }
+  }
+
+  for (const attempt of input.diagnostics.providersAttempted) {
+    if (attempt.provider === "existing_properties") continue;
+    for (const [reason, count] of Object.entries(attempt.rejectionReasons)) {
+      const bucket = rejectionReasonToFunnelBucket(reason);
+      if (bucket) {
+        for (let index = 0; index < count; index += 1) addFunnelBucket(funnel, bucket);
+      }
+    }
+  }
+  for (let index = 0; index < input.duplicateCandidateCount; index += 1) addFunnelBucket(funnel, "DUPLICATE");
+  saturation.notKnocked = Math.max(0, saturation.discovered - saturation.knocked);
+  saturation.untouchedPercent = saturation.discovered > 0
+    ? Math.round((saturation.notKnocked / saturation.discovered) * 100)
+    : null;
+
+  const sourceWarning = input.coverageSourceSucceeded
+    ? null
+    : input.coverageSource
+      ? "Discovery source did not complete a full geographic query."
+      : "Coverage is unavailable until a geographic discovery source returns data.";
+  const coverage = buildCoverageSummary({
+    cellCount: input.coverageCells.length,
+    source: input.coverageSource,
+    sourceSucceeded: input.coverageSourceSucceeded,
+    discoveredCellCount: Math.min(input.coverageCells.length, countMatchingCoverageCells(input.coverageCells, input.candidates, "DISCOVERED")),
+    verifiedCellCount: verifiedCellKeys.size,
+    solarAnalyzedCellCount: solarAnalyzedCellKeys.size,
+    completeCellCount: completeCellKeys.size,
+    warning: sourceWarning,
+  });
+  const warnings = [
+    ...(coverage.warning ? [coverage.warning] : []),
+    ...(input.diagnostics.providersAttempted.filter((attempt) => attempt.error).map((attempt) => `${attempt.provider}: ${attempt.error}`)),
+  ];
+
+  return {
+    coverage,
+    funnel,
+    densePocketCount: input.densePocketCount,
+    discoveredPropertyCount: input.diagnostics.rawCandidateCount || input.candidates.length,
+    residentialPropertyCount: input.candidates.filter((candidate) => isResidentialPropertyUse(candidate.propertyUse)).length,
+    verifiedPropertyCount,
+    existingSolarCount,
+    solarViableCount,
+    strongLeadCount,
+    whaleCount,
+    capacityBands,
+    saturation,
+    clusteredPropertyCount: input.candidates.filter((candidate) => candidate.nearbyPropertyCount > 0).length,
+    isolatedPropertyCount: input.candidates.filter((candidate) => candidate.nearbyPropertyCount === 0).length,
+    neighborhoodSignals: {
+      propertiesWithNeighbors,
+      nearbyPropertyCount,
+      nearbyVerifiedCount,
+      nearbyStrongCount,
+      nearbyWhaleCount,
+    },
+    desiredWhaleCount: input.desiredWhaleCount,
+    measuredAt: new Date().toISOString(),
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function countMatchingCoverageCells(
+  cells: ReturnType<typeof buildDiscoveryCoverageCells>,
+  candidates: DiscoveryCandidateRecord[],
+  _status: "DISCOVERED",
+): number {
+  const keys = new Set(cells.map((cell) => cell.key));
+  return new Set(
+    candidates
+      .filter((candidate) => candidate.property.latitude != null && candidate.property.longitude != null)
+      .map((candidate) => coverageCellKey({ latitude: candidate.property.latitude ?? 0, longitude: candidate.property.longitude ?? 0 }))
+      .filter((key) => keys.has(key)),
+  ).size;
+}
+
+function updateDiscoveryCoverageDiagnostics(
+  diagnostics: DiscoveryDiagnostics,
+  cells: ReturnType<typeof buildDiscoveryCoverageCells>,
+  candidates: DiscoveryCandidateRecord[],
+  sourceSucceeded: boolean,
+): void {
+  const discoveredCellCount = countMatchingCoverageCells(cells, candidates, "DISCOVERED");
+  const processedCellCount = sourceSucceeded ? cells.length : discoveredCellCount;
+  diagnostics.coverageCellCount = cells.length;
+  diagnostics.processedCellCount = processedCellCount;
+  diagnostics.remainingCellCount = Math.max(0, cells.length - processedCellCount);
+  diagnostics.coveragePercent = cells.length > 0 ? Math.round((processedCellCount / cells.length) * 100) : null;
+}
+
+function rejectionReasonToFunnelBucket(reason: string): DiscoveryFunnelBucket | null {
+  if (reason === "duplicate") return "DUPLICATE";
+  if (reason === "source_error") return "PROCESSING_ERROR";
+  if (["commercial", "industrial", "other_non_residential"].includes(reason)) return "NON_RESIDENTIAL";
+  if (reason === "vacant" || reason === "unknown") return "NO_BUILDING";
+  if (reason === "missing_geometry") return "BAD_ADDRESS";
+  return null;
+}
+
+function isKnockedOutcome(outcome: LeadOutcome["outcome"] | undefined): boolean {
+  return Boolean(outcome && [
+    "KNOCKED",
+    "NOT_HOME",
+    "CONVERSATION",
+    "NOT_INTERESTED",
+    "RENTER",
+    "DID_NOT_QUALIFY",
+    "BILL_REQUESTED",
+    "BILL_RECEIVED",
+    "APPOINTMENT_BOOKED",
+    "APPOINTMENT_COMPLETED",
+    "SIGNED",
+    "CANCELLED",
+    "INSTALLED",
+  ].includes(outcome));
+}
+
+function isAppointmentOutcome(outcome: LeadOutcome["outcome"] | undefined): boolean {
+  return Boolean(outcome && ["APPOINTMENT_BOOKED", "APPOINTMENT_COMPLETED", "SIGNED", "INSTALLED"].includes(outcome));
+}
+
+function isClosedOutcome(outcome: LeadOutcome["outcome"] | undefined): boolean {
+  return outcome === "SIGNED" || outcome === "INSTALLED";
 }
 
 interface DiscoveryClusterBuildResult {
@@ -3047,7 +3736,9 @@ function buildDiscoveryClusters(
 ): DiscoveryClusterBuildResult {
   const clusterRadiusMeters = getDiscoveryClusterRadiusMeters();
   const clusterMembers: DiscoveryClusterMembers[] = [];
-  const candidates = sourceCandidates.map((candidate) => ({ ...candidate }));
+  // Keep one candidate object through discovery, analysis, and final ranking so
+  // verification and score updates cannot diverge between parallel copies.
+  const candidates = sourceCandidates.slice();
 
   for (const candidate of [...candidates].sort((left, right) => propertyOpportunityScore(right) - propertyOpportunityScore(left))) {
     if (candidate.property.latitude == null || candidate.property.longitude == null) {
@@ -3152,6 +3843,7 @@ function buildDiscoveryClusterSummary(
     intraClusterMiles,
   });
   const existingSolarCount = cluster.members.filter((candidate) => candidate.solarAssessment?.existingSolarStatus === "DETECTED").length;
+  const saturation = buildCandidateSaturation(cluster.members);
   const lowEfficiencyZones = [
     ...(densityScore < 35 ? ["LOW_LEAD_DENSITY" as const] : []),
     ...(propertyCount <= 3 && meanDistanceToCenter > clusterRadiusMeters * 0.55 ? ["SPARSE_HOUSING" as const] : []),
@@ -3179,6 +3871,7 @@ function buildDiscoveryClusterSummary(
     fieldEfficiencyScore: fieldEfficiency.score,
     fieldPriorityScore,
     lowEfficiencyZones,
+    saturation,
   };
 }
 
@@ -3194,19 +3887,43 @@ function centroidForProperties(candidates: DiscoveryCandidateRecord[]): { latitu
 }
 
 function propertyOpportunityScore(candidate: DiscoveryCandidateRecord): number {
+  if (candidate.verificationStatus === "REJECTED") return 0;
   return candidate.opportunityAssessment?.overallOpportunityScore ?? candidate.cheapScore;
 }
 
 function solarOpportunityScore(candidate: DiscoveryCandidateRecord): number {
+  if (candidate.verificationStatus === "REJECTED") return 0;
   return candidate.solarAssessment?.solarFitScore ?? candidate.opportunityAssessment?.solarFitScore ?? candidate.cheapScore;
 }
 
 function isStrongDiscoveryCandidate(candidate: DiscoveryCandidateRecord): boolean {
-  return propertyOpportunityScore(candidate) >= 70 || candidate.cheapScore >= 65 || (candidate.opportunityAssessment?.whaleScore ?? 0) >= 60;
+  return candidate.verificationStatus === "VERIFIED" && (
+    propertyOpportunityScore(candidate) >= 70 ||
+    (candidate.opportunityAssessment?.whaleScore ?? 0) >= 60
+  );
 }
 
 function average(values: number[]): number {
   return values.length > 0 ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+}
+
+function buildCandidateSaturation(candidates: DiscoveryCandidateRecord[]) {
+  const saturation = emptyDiscoverySaturation();
+  saturation.discovered = candidates.length;
+  for (const candidate of candidates) {
+    const bucket = candidate.funnelBucket;
+    if (candidate.verificationStatus === "VERIFIED" && bucket != null && ["VIABLE", "STRONG", "WHALE"].includes(bucket)) {
+      saturation.qualified += 1;
+    }
+    if (isKnockedOutcome(candidate.leadOutcome?.outcome)) saturation.knocked += 1;
+    if (isAppointmentOutcome(candidate.leadOutcome?.outcome)) saturation.appointments += 1;
+    if (isClosedOutcome(candidate.leadOutcome?.outcome)) saturation.closed += 1;
+  }
+  saturation.notKnocked = Math.max(0, saturation.discovered - saturation.knocked);
+  saturation.untouchedPercent = saturation.discovered > 0
+    ? Math.round((saturation.notKnocked / saturation.discovered) * 100)
+    : null;
+  return saturation;
 }
 
 function getDiscoveryClusterRadiusMeters(): number {
@@ -3316,15 +4033,29 @@ function mapDiscoveryResult(
   analysisStatus: DiscoveryScanLead["analysisStatus"],
 ): DiscoveryScanLead {
   const lead = mapAnalyzeResultToLeadCard(analysis, false);
+  const scoreEligible = candidate.verificationStatus === "VERIFIED";
   return {
     ...lead,
+    opportunityScore: scoreEligible ? lead.opportunityScore : 0,
+    whaleScore: scoreEligible ? lead.whaleScore : 0,
     distanceMiles: candidate.distanceMiles,
     analysisStatus,
     candidateScore: Math.round(candidate.cheapScore),
     routeReason: candidate.routeReason,
     clusterId: candidate.clusterId,
-    propertyOpportunityScore: Math.round(propertyOpportunityScore(candidate)),
-    solarOpportunityScore: Math.round(solarOpportunityScore(candidate)),
+    propertyOpportunityScore: scoreEligible ? Math.round(propertyOpportunityScore(candidate)) : 0,
+    solarOpportunityScore: scoreEligible ? Math.round(solarOpportunityScore(candidate)) : 0,
+    solarScore: Math.round(analysis.solarAssessment.solarFitScore),
+    verificationStatus: candidate.verificationStatus,
+    funnelBucket: candidate.funnelBucket,
+    capacityBand: candidate.capacityBand,
+    rejectionReason: candidate.rejectionReason,
+    marketEligibility: buildMarketEligibility(candidate.solarAssessment ?? analysis.solarAssessment),
+    nearbyPropertyCount: candidate.nearbyPropertyCount,
+    nearbyVerifiedCount: candidate.nearbyVerifiedCount,
+    nearbyStrongCount: candidate.nearbyStrongCount,
+    nearbyWhaleCount: candidate.nearbyWhaleCount,
+    nearbyCountsByRadius: candidate.nearbyCountsByRadius,
     fieldEfficiencyScore: candidate.fieldEfficiencyScore,
     fieldPriorityScore: candidate.fieldPriorityScore,
   };
@@ -3336,6 +4067,7 @@ function buildPendingDiscoveryResult(
   analysisStatus: "ANALYZING" | "CACHED" = "ANALYZING",
 ): DiscoveryScanLead {
   const useKnownScore = Math.round(candidate.cheapScore);
+  const scoreEligible = candidate.verificationStatus === "VERIFIED";
   const solarAssessment = candidate.solarAssessment;
   const opportunityAssessment = candidate.opportunityAssessment;
   const homeownerConfirmations = solarAssessment
@@ -3361,9 +4093,9 @@ function buildPendingDiscoveryResult(
     postalCode: addressParts.postalCode,
     address: addressParts.displayAddress,
     neighborhood: candidate.market?.name ?? candidate.property.municipality ?? candidate.property.city ?? candidate.property.county ?? "Unknown area",
-    opportunityScore: opportunityAssessment?.overallOpportunityScore ?? useKnownScore,
-    whaleScore: opportunityAssessment?.whaleScore ?? Math.min(100, Math.round(candidate.cheapScore * 0.8)),
-    solarFitScore: solarAssessment?.solarFitScore ?? Math.min(100, Math.round(candidate.cheapScore * 0.75)),
+    opportunityScore: scoreEligible ? opportunityAssessment?.overallOpportunityScore ?? useKnownScore : 0,
+    whaleScore: scoreEligible ? opportunityAssessment?.whaleScore ?? Math.min(100, Math.round(candidate.cheapScore * 0.8)) : 0,
+    solarFitScore: candidate.verificationStatus === "REJECTED" ? 0 : solarAssessment?.solarFitScore ?? Math.min(100, Math.round(candidate.cheapScore * 0.75)),
     confidence: analysisStatus === "CACHED" ? solarAssessment?.solarFitConfidence ?? 80 : 44,
     maxRoofSolarCapacityKw: candidate.maxRoofSolarCapacityKw,
     confirmedAnnualUsageKwh: candidate.confirmedAnnualUsageKwh,
@@ -3399,8 +4131,19 @@ function buildPendingDiscoveryResult(
     candidateScore: useKnownScore,
     routeReason: candidate.routeReason,
     clusterId: candidate.clusterId,
-    propertyOpportunityScore: Math.round(propertyOpportunityScore(candidate)),
-    solarOpportunityScore: Math.round(solarOpportunityScore(candidate)),
+    propertyOpportunityScore: scoreEligible ? Math.round(propertyOpportunityScore(candidate)) : 0,
+    solarOpportunityScore: scoreEligible ? Math.round(solarOpportunityScore(candidate)) : 0,
+    solarScore: solarAssessment?.solarFitScore ?? undefined,
+    verificationStatus: candidate.verificationStatus,
+    funnelBucket: candidate.funnelBucket,
+    capacityBand: candidate.capacityBand,
+    rejectionReason: candidate.rejectionReason,
+    marketEligibility: buildMarketEligibility(solarAssessment),
+    nearbyPropertyCount: candidate.nearbyPropertyCount,
+    nearbyVerifiedCount: candidate.nearbyVerifiedCount,
+    nearbyStrongCount: candidate.nearbyStrongCount,
+    nearbyWhaleCount: candidate.nearbyWhaleCount,
+    nearbyCountsByRadius: candidate.nearbyCountsByRadius,
     fieldEfficiencyScore: candidate.fieldEfficiencyScore,
     fieldPriorityScore: candidate.fieldPriorityScore,
   };
@@ -3408,8 +4151,10 @@ function buildPendingDiscoveryResult(
 
 function deriveCheapBadges(candidate: DiscoveryCandidateRecord): LeadSignalBadge[] {
   const badges: LeadSignalBadge[] = [];
-  if ((candidate.maxRoofSolarCapacityKw ?? 0) >= 15) {
-    badges.push({ label: "WHALE", tone: "MODEL" });
+  if (candidate.capacityBand === "MEGA_WHALE" || candidate.capacityBand === "WHALE") {
+    badges.push({ label: candidate.capacityBand === "MEGA_WHALE" ? "MEGA WHALE" : "WHALE", tone: "MODEL" });
+  } else if (candidate.capacityBand === "LARGE") {
+    badges.push({ label: "LARGE", tone: "MODEL" });
   }
   if (candidate.signals.includes("Recent roof permit")) {
     badges.push({ label: "PUBLIC RECORD", tone: "PUBLIC_RECORD" });
@@ -3418,6 +4163,26 @@ function deriveCheapBadges(candidate: DiscoveryCandidateRecord): LeadSignalBadge
     badges.push({ label: "VERIFY", tone: "MISSING" });
   }
   return badges.slice(0, 3);
+}
+
+function buildMarketEligibility(solarAssessment: SolarAssessment | null) {
+  if (!solarAssessment) {
+    return {
+      existingSolar: null,
+      installer: null,
+      confidence: null,
+      allowedForCurrentCampaign: true,
+      reasons: ["Existing-solar status has not been analyzed yet."],
+    };
+  }
+  const detected = solarAssessment.existingSolarStatus === "DETECTED";
+  return {
+    existingSolar: detected,
+    installer: null,
+    confidence: solarAssessment.existingSolarConfidence ?? solarAssessment.solarFitConfidence,
+    allowedForCurrentCampaign: !detected,
+    reasons: detected ? ["Existing solar detected by the configured imagery provider."] : [],
+  };
 }
 
 function buildDiscoveryReasons(input: {
@@ -4065,6 +4830,30 @@ async function persistSolarAnalysis(
     createdAt: now,
   };
   const persistedAssessment = await repository.upsertSolarAssessment(solarAssessment);
+  try {
+    await repository.upsertMarketExclusion({
+      id: stableId(`${property.id}:market-exclusion:${solar.provider}`),
+      propertyId: property.id,
+      exclusionState: solar.existingSolarStatus === "DETECTED"
+        ? "SOLAR_DETECTED"
+        : solar.existingSolarStatus === "NOT_DETECTED"
+          ? "NO_KNOWN_SOLAR"
+          : "UNKNOWN",
+      exclusionType: "EXISTING_SOLAR_PROVIDER_SIGNAL",
+      sourceProvider: solar.provider,
+      sourceRecordId: solar.providerBuildingId ?? null,
+      observedAt: now,
+      confidence: solar.existingSolarConfidence ?? scoreBreakdown.confidence,
+      systemSizeKw: null,
+      evidenceJson: {
+        providerBuildingId: solar.providerBuildingId ?? null,
+        imageryDate: solar.imageryDate ?? null,
+        existingSolarStatus: solar.existingSolarStatus,
+      },
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "market_exclusion_persist_failed", propertyId: property.id, error: error instanceof Error ? error.message : String(error) }));
+  }
   const persistedSegments = await repository.replaceRoofSegments(persistedAssessment.id, buildRoofSegments(persistedAssessment, solar));
   const persistedAudit = await repository.upsertSolarAssessmentAudit({
     solarAssessmentId: persistedAssessment.id,

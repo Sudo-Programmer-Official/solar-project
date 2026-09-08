@@ -36,6 +36,10 @@ export interface SolarRepository {
   getOpportunityAssessmentByPropertyId(propertyId: string): Promise<OpportunityAssessment | null>;
   listPermits(propertyId: string): Promise<PermitRecord[]>;
   getPermitStats(municipality: string): Promise<PermitStatsResult>;
+  upsertDiscoveryScanCheckpoint(input: DiscoveryScanCheckpointUpsertInput): Promise<DiscoveryScanCheckpointRecord>;
+  replaceDiscoveryScanCells(scanId: string, cells: DiscoveryScanCellUpsertInput[]): Promise<void>;
+  upsertMarketExclusion(input: MarketExclusionUpsertInput): Promise<MarketExclusionRecord>;
+  upsertPropertyVerification(input: PropertyVerificationUpsertInput): Promise<PropertyVerificationRecord>;
 }
 
 export interface DiscoveryPropertyMetadata {
@@ -127,6 +131,76 @@ export interface PermitStatsResult {
   recentContractors: string[];
 }
 
+export interface DiscoveryScanCheckpointUpsertInput {
+  scanId: string;
+  status: string;
+  stage: string | null;
+  centerLatitude: number;
+  centerLongitude: number;
+  radiusMiles: number;
+  checkpointJson: unknown;
+  coverageJson: unknown;
+  funnelJson: unknown;
+  metricsJson: unknown;
+  startedAt: string;
+  updatedAt?: string;
+  completedAt?: string | null;
+}
+
+export interface DiscoveryScanCheckpointRecord extends DiscoveryScanCheckpointUpsertInput {
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface DiscoveryScanCellUpsertInput {
+  id: string;
+  cellKey: string;
+  centerLatitude: number;
+  centerLongitude: number;
+  radiusMiles: number;
+  status: "UNSCANNED" | "DISCOVERED" | "VERIFIED" | "SOLAR_ANALYZED" | "COMPLETE";
+  discoveredCount: number;
+  verifiedCount: number;
+  solarAnalyzedCount: number;
+}
+
+export interface MarketExclusionUpsertInput {
+  id: string;
+  propertyId: string;
+  exclusionState: "NO_KNOWN_SOLAR" | "SOLAR_DETECTED" | "KNOWN_INSTALL" | "PARTNER_INELIGIBLE" | "MANUAL_EXCLUSION" | "UNKNOWN";
+  exclusionType: string;
+  sourceProvider: string;
+  sourceRecordId?: string | null;
+  sourceUrl?: string | null;
+  observedAt?: string;
+  confidence: number;
+  installerName?: string | null;
+  systemSizeKw?: number | null;
+  evidenceJson?: unknown;
+}
+
+export interface MarketExclusionRecord extends MarketExclusionUpsertInput {
+  observedAt: string;
+  createdAt: string;
+}
+
+export interface PropertyVerificationUpsertInput {
+  id: string;
+  scanId?: string | null;
+  propertyId: string;
+  status: "VERIFIED" | "REVIEW" | "REJECTED" | "UNKNOWN";
+  verificationScore: number;
+  rejectionReason?: string | null;
+  checksJson: unknown;
+  sourceProvider: string;
+  observedAt?: string;
+}
+
+export interface PropertyVerificationRecord extends PropertyVerificationUpsertInput {
+  observedAt: string;
+  createdAt: string;
+}
+
 export type QueryRow = Record<string, unknown>;
 
 export interface QueryResult<T = QueryRow> {
@@ -150,6 +224,8 @@ export class InMemorySolarRepository implements SolarRepository {
   private readonly opportunityAssessments = new Map<string, OpportunityAssessment>();
   private readonly permitRecords = new Map<string, PermitRecord[]>();
   private readonly propertySignals = new Map<string, PropertySignal[]>();
+  private readonly discoveryScanCheckpoints = new Map<string, DiscoveryScanCheckpointRecord>();
+  private readonly discoveryScanCells = new Map<string, DiscoveryScanCellUpsertInput[]>();
 
   async upsertProperty(input: PropertyUpsertInput): Promise<Property> {
     const now = input.createdAt ?? new Date().toISOString();
@@ -330,6 +406,45 @@ export class InMemorySolarRepository implements SolarRepository {
       averageApprovalDays: averageApprovalDays(records),
       solarPermitDensity: solar.length / Math.max(1, records.length),
       recentContractors: uniqueStrings(records.map((permit) => permit.contractorName)),
+    };
+  }
+
+  async upsertDiscoveryScanCheckpoint(input: DiscoveryScanCheckpointUpsertInput): Promise<DiscoveryScanCheckpointRecord> {
+    const now = input.updatedAt ?? new Date().toISOString();
+    const record: DiscoveryScanCheckpointRecord = {
+      ...input,
+      updatedAt: now,
+      completedAt: input.completedAt ?? null,
+    };
+    this.discoveryScanCheckpoints.set(input.scanId, record);
+    return record;
+  }
+
+  async replaceDiscoveryScanCells(scanId: string, cells: DiscoveryScanCellUpsertInput[]): Promise<void> {
+    this.discoveryScanCells.set(scanId, cells.map((cell) => ({ ...cell })));
+  }
+
+  async upsertMarketExclusion(input: MarketExclusionUpsertInput): Promise<MarketExclusionRecord> {
+    const record: MarketExclusionRecord = {
+      ...input,
+      sourceRecordId: input.sourceRecordId ?? null,
+      sourceUrl: input.sourceUrl ?? null,
+      observedAt: input.observedAt ?? new Date().toISOString(),
+      installerName: input.installerName ?? null,
+      systemSizeKw: input.systemSizeKw ?? null,
+      evidenceJson: input.evidenceJson ?? {},
+      createdAt: new Date().toISOString(),
+    };
+    return record;
+  }
+
+  async upsertPropertyVerification(input: PropertyVerificationUpsertInput): Promise<PropertyVerificationRecord> {
+    return {
+      ...input,
+      scanId: input.scanId ?? null,
+      rejectionReason: input.rejectionReason ?? null,
+      observedAt: input.observedAt ?? new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     };
   }
 }
@@ -1362,6 +1477,209 @@ export class PostgresSolarRepository implements SolarRepository {
       averageApprovalDays: averageApprovalDays(records),
       solarPermitDensity: solar.length / Math.max(1, records.length),
       recentContractors: uniqueStrings(records.map((permit) => permit.contractorName)),
+    };
+  }
+
+  async upsertDiscoveryScanCheckpoint(input: DiscoveryScanCheckpointUpsertInput): Promise<DiscoveryScanCheckpointRecord> {
+    const rows = await this.client.query<DiscoveryScanCheckpointRecord>(
+      `
+      INSERT INTO discovery_scan_runs (
+        scan_id, status, stage, center_latitude, center_longitude, radius_miles,
+        checkpoint_json, coverage_json, funnel_json, metrics_json,
+        started_at, updated_at, completed_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,COALESCE($12, NOW()),$13)
+      ON CONFLICT (scan_id) DO UPDATE SET
+        status = EXCLUDED.status,
+        stage = EXCLUDED.stage,
+        center_latitude = EXCLUDED.center_latitude,
+        center_longitude = EXCLUDED.center_longitude,
+        radius_miles = EXCLUDED.radius_miles,
+        checkpoint_json = EXCLUDED.checkpoint_json,
+        coverage_json = EXCLUDED.coverage_json,
+        funnel_json = EXCLUDED.funnel_json,
+        metrics_json = EXCLUDED.metrics_json,
+        updated_at = EXCLUDED.updated_at,
+        completed_at = EXCLUDED.completed_at
+      RETURNING
+        scan_id AS "scanId",
+        status,
+        stage,
+        center_latitude AS "centerLatitude",
+        center_longitude AS "centerLongitude",
+        radius_miles AS "radiusMiles",
+        checkpoint_json AS "checkpointJson",
+        coverage_json AS "coverageJson",
+        funnel_json AS "funnelJson",
+        metrics_json AS "metricsJson",
+        started_at AS "startedAt",
+        updated_at AS "updatedAt",
+        completed_at AS "completedAt"
+      `,
+      [
+        input.scanId,
+        input.status,
+        input.stage,
+        input.centerLatitude,
+        input.centerLongitude,
+        input.radiusMiles,
+        JSON.stringify(input.checkpointJson),
+        JSON.stringify(input.coverageJson),
+        JSON.stringify(input.funnelJson),
+        JSON.stringify(input.metricsJson),
+        input.startedAt,
+        input.updatedAt ?? null,
+        input.completedAt ?? null,
+      ],
+    );
+    const row = rows.rows[0];
+    return {
+      ...row,
+      centerLatitude: coerceNumber(row.centerLatitude) ?? input.centerLatitude,
+      centerLongitude: coerceNumber(row.centerLongitude) ?? input.centerLongitude,
+      radiusMiles: coerceNumber(row.radiusMiles) ?? input.radiusMiles,
+      updatedAt: row.updatedAt ?? input.updatedAt ?? new Date().toISOString(),
+      completedAt: row.completedAt ?? null,
+    };
+  }
+
+  async replaceDiscoveryScanCells(scanId: string, cells: DiscoveryScanCellUpsertInput[]): Promise<void> {
+    await this.client.query(`DELETE FROM discovery_scan_cells WHERE scan_id = $1`, [scanId]);
+    for (const cell of cells) {
+      await this.client.query(
+        `
+        INSERT INTO discovery_scan_cells (
+          id, scan_id, cell_key, center_latitude, center_longitude, radius_miles,
+          status, discovered_count, verified_count, solar_analyzed_count, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+        ON CONFLICT (scan_id, cell_key) DO UPDATE SET
+          center_latitude = EXCLUDED.center_latitude,
+          center_longitude = EXCLUDED.center_longitude,
+          radius_miles = EXCLUDED.radius_miles,
+          status = EXCLUDED.status,
+          discovered_count = EXCLUDED.discovered_count,
+          verified_count = EXCLUDED.verified_count,
+          solar_analyzed_count = EXCLUDED.solar_analyzed_count,
+          updated_at = NOW()
+        `,
+        [
+          cell.id,
+          scanId,
+          cell.cellKey,
+          cell.centerLatitude,
+          cell.centerLongitude,
+          cell.radiusMiles,
+          cell.status,
+          cell.discoveredCount,
+          cell.verifiedCount,
+          cell.solarAnalyzedCount,
+        ],
+      );
+    }
+  }
+
+  async upsertMarketExclusion(input: MarketExclusionUpsertInput): Promise<MarketExclusionRecord> {
+    const rows = await this.client.query<MarketExclusionRecord>(
+      `
+      INSERT INTO market_exclusions (
+        id, property_id, exclusion_state, exclusion_type, source_provider,
+        source_record_id, source_url, observed_at, confidence, installer_name,
+        system_size_kw, evidence_json
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,COALESCE($8, NOW()),$9,$10,$11,$12)
+      ON CONFLICT (id) DO UPDATE SET
+        exclusion_state = EXCLUDED.exclusion_state,
+        exclusion_type = EXCLUDED.exclusion_type,
+        source_provider = EXCLUDED.source_provider,
+        source_record_id = EXCLUDED.source_record_id,
+        source_url = EXCLUDED.source_url,
+        observed_at = EXCLUDED.observed_at,
+        confidence = EXCLUDED.confidence,
+        installer_name = EXCLUDED.installer_name,
+        system_size_kw = EXCLUDED.system_size_kw,
+        evidence_json = EXCLUDED.evidence_json
+      RETURNING
+        id,
+        property_id AS "propertyId",
+        exclusion_state AS "exclusionState",
+        exclusion_type AS "exclusionType",
+        source_provider AS "sourceProvider",
+        source_record_id AS "sourceRecordId",
+        source_url AS "sourceUrl",
+        observed_at AS "observedAt",
+        confidence,
+        installer_name AS "installerName",
+        system_size_kw AS "systemSizeKw",
+        evidence_json AS "evidenceJson",
+        created_at AS "createdAt"
+      `,
+      [
+        input.id,
+        input.propertyId,
+        input.exclusionState,
+        input.exclusionType,
+        input.sourceProvider,
+        input.sourceRecordId ?? null,
+        input.sourceUrl ?? null,
+        input.observedAt ?? null,
+        input.confidence,
+        input.installerName ?? null,
+        input.systemSizeKw ?? null,
+        JSON.stringify(input.evidenceJson ?? {}),
+      ],
+    );
+    const row = rows.rows[0];
+    return {
+      ...row,
+      confidence: coerceNumber(row.confidence) ?? input.confidence,
+      systemSizeKw: coerceNumber(row.systemSizeKw),
+      observedAt: row.observedAt ?? input.observedAt ?? new Date().toISOString(),
+      createdAt: row.createdAt ?? new Date().toISOString(),
+    };
+  }
+
+  async upsertPropertyVerification(input: PropertyVerificationUpsertInput): Promise<PropertyVerificationRecord> {
+    const rows = await this.client.query<PropertyVerificationRecord>(
+      `
+      INSERT INTO property_verifications (
+        id, scan_id, property_id, status, verification_score, rejection_reason,
+        checks_json, source_provider, observed_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, NOW()))
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        verification_score = EXCLUDED.verification_score,
+        rejection_reason = EXCLUDED.rejection_reason,
+        checks_json = EXCLUDED.checks_json,
+        source_provider = EXCLUDED.source_provider,
+        observed_at = EXCLUDED.observed_at
+      RETURNING
+        id,
+        scan_id AS "scanId",
+        property_id AS "propertyId",
+        status,
+        verification_score AS "verificationScore",
+        rejection_reason AS "rejectionReason",
+        checks_json AS "checksJson",
+        source_provider AS "sourceProvider",
+        observed_at AS "observedAt",
+        created_at AS "createdAt"
+      `,
+      [
+        input.id,
+        input.scanId ?? null,
+        input.propertyId,
+        input.status,
+        input.verificationScore,
+        input.rejectionReason ?? null,
+        JSON.stringify(input.checksJson),
+        input.sourceProvider,
+        input.observedAt ?? null,
+      ],
+    );
+    const row = rows.rows[0];
+    return {
+      ...row,
+      verificationScore: coerceNumber(row.verificationScore) ?? input.verificationScore,
+      observedAt: row.observedAt ?? input.observedAt ?? new Date().toISOString(),
+      createdAt: row.createdAt ?? new Date().toISOString(),
     };
   }
 }

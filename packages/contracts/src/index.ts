@@ -723,6 +723,7 @@ export interface DiscoveryScanRequest {
   filters?: DiscoveryScanFilters;
   limit?: number;
   maxGoogleSolarCalls?: number;
+  desiredWhaleCount?: number;
 }
 
 export interface DiscoveryScanLead extends TodayLeadCard {
@@ -731,10 +732,27 @@ export interface DiscoveryScanLead extends TodayLeadCard {
   candidateScore: number;
   routeReason: string;
   clusterId?: string | null;
+  solarScore?: number;
+  verificationStatus?: "VERIFIED" | "REVIEW" | "REJECTED" | "UNKNOWN";
+  funnelBucket?: DiscoveryFunnelBucket;
+  nearbyPropertyCount?: number;
+  nearbyVerifiedCount?: number;
+  nearbyStrongCount?: number;
+  nearbyWhaleCount?: number;
+  nearbyCountsByRadius?: Record<string, number>;
   propertyOpportunityScore?: number;
   solarOpportunityScore?: number;
   fieldEfficiencyScore?: number;
   fieldPriorityScore?: number;
+  capacityBand?: DiscoveryCapacityBand;
+  rejectionReason?: string | null;
+  marketEligibility?: {
+    existingSolar: boolean | null;
+    installer: string | null;
+    confidence: number | null;
+    allowedForCurrentCampaign: boolean;
+    reasons: string[];
+  };
 }
 
 export type LowEfficiencyZoneLabel =
@@ -769,6 +787,7 @@ export interface DiscoveryClusterSummary extends NeighborhoodCluster {
   id: string;
   candidateCount: number;
   averageSolarScore: number;
+  saturation?: DiscoverySaturationSummary;
 }
 
 export const DiscoveryScanStage = {
@@ -840,6 +859,35 @@ export interface DiscoveryProviderAttemptDiagnostics {
   error: string | null;
 }
 
+export type DiscoveryNeighborMissReason =
+  | "source_not_returned"
+  | "duplicate"
+  | "outside_radius"
+  | "non_residential"
+  | "verification_failed"
+  | "already_processed"
+  | "source_error"
+  | "filtered_by_rule";
+
+export interface DiscoveryNeighborDiagnostics {
+  distancesMeters: number[];
+  anchorPropertyCount: number;
+  searchedAnchorCount: number;
+  providerQueryCount: number;
+  foundNeighborCount: number;
+  missReasons: Partial<Record<DiscoveryNeighborMissReason, number>>;
+  warning: string | null;
+}
+
+export interface DiscoveryNeighborDebugResult {
+  targetPropertyId: string;
+  address: string | null;
+  discovered: boolean;
+  reason: DiscoveryNeighborMissReason | null;
+  distanceMiles: number | null;
+  checkedRadiiMeters: number[];
+}
+
 export interface DiscoveryDiagnostics {
   center: ScanCenter;
   radiusMiles: number;
@@ -848,6 +896,14 @@ export interface DiscoveryDiagnostics {
   deduplicatedCandidateCount: number;
   residentialCandidateCount: number;
   prequalifiedCount: number;
+  coverageCellCount?: number;
+  processedCellCount?: number;
+  remainingCellCount?: number;
+  coveragePercent?: number | null;
+  neighborExpansion?: DiscoveryNeighborDiagnostics;
+  discoveredPropertyIds?: string[];
+  discoveredPropertyKeys?: string[];
+  filteredPropertyIds?: string[];
 }
 
 export interface DiscoveryScanResult {
@@ -863,6 +919,7 @@ export interface DiscoveryScanResult {
   solarAnalyzedCount: number;
   results: DiscoveryScanLead[];
   clusters?: DiscoveryClusterSummary[];
+  marketMetrics?: DiscoveryMarketMetrics;
 }
 
 export interface DiscoveryScanResultsPage {
@@ -913,6 +970,104 @@ export interface DiscoveryScanMetrics {
   totalMs: number | null;
 }
 
+export const DiscoveryCoverageCellStatus = {
+  UNSCANNED: "UNSCANNED",
+  DISCOVERED: "DISCOVERED",
+  VERIFIED: "VERIFIED",
+  SOLAR_ANALYZED: "SOLAR_ANALYZED",
+  COMPLETE: "COMPLETE",
+} as const;
+
+export type DiscoveryCoverageCellStatus = (typeof DiscoveryCoverageCellStatus)[keyof typeof DiscoveryCoverageCellStatus];
+
+export type DiscoveryFunnelBucket =
+  | "VIABLE"
+  | "STRONG"
+  | "WHALE"
+  | "EXISTING_SOLAR"
+  | "NON_RESIDENTIAL"
+  | "NO_BUILDING"
+  | "BAD_ADDRESS"
+  | "DUPLICATE"
+  | "LOW_SOLAR"
+  | "UNVERIFIED"
+  | "PROCESSING_ERROR";
+
+export interface DiscoveryFunnelCounts {
+  viable: number;
+  strong: number;
+  whale: number;
+  existingSolar: number;
+  nonResidential: number;
+  noBuilding: number;
+  badAddress: number;
+  duplicate: number;
+  lowSolar: number;
+  unverified: number;
+  processingError: number;
+  total: number;
+}
+
+export interface DiscoveryCoverageSummary {
+  status: "MEASURED" | "PARTIAL" | "UNAVAILABLE";
+  cellCount: number;
+  attemptedCellCount: number;
+  discoveredCellCount: number;
+  verifiedCellCount: number;
+  solarAnalyzedCellCount: number;
+  completeCellCount: number;
+  coveragePercent: number | null;
+  source: string | null;
+  warning: string | null;
+}
+
+export interface DiscoverySaturationSummary {
+  discovered: number;
+  qualified: number;
+  knocked: number;
+  notKnocked: number;
+  appointments: number;
+  closed: number;
+  untouchedPercent: number | null;
+}
+
+export type DiscoveryCapacityBand = "UNKNOWN" | "STANDARD" | "LARGE" | "WHALE" | "MEGA_WHALE";
+
+export interface DiscoveryCapacityBandCounts {
+  unknown: number;
+  standard: number;
+  large: number;
+  whale: number;
+  megaWhale: number;
+}
+
+export interface DiscoveryMarketMetrics {
+  coverage: DiscoveryCoverageSummary;
+  funnel: DiscoveryFunnelCounts;
+  densePocketCount: number;
+  discoveredPropertyCount: number;
+  residentialPropertyCount: number;
+  verifiedPropertyCount: number;
+  existingSolarCount: number;
+  solarViableCount: number;
+  strongLeadCount: number;
+  whaleCount: number;
+  capacityBands: DiscoveryCapacityBandCounts;
+  saturation: DiscoverySaturationSummary;
+  clusteredPropertyCount: number;
+  isolatedPropertyCount: number;
+  neighborhoodSignals: {
+    propertiesWithNeighbors: number;
+    nearbyPropertyCount: number;
+    nearbyVerifiedCount: number;
+    nearbyStrongCount: number;
+    nearbyWhaleCount: number;
+  };
+  desiredWhaleCount: number | null;
+  measuredAt: string;
+  warnings: string[];
+}
+
 export interface DiscoveryScanProgress extends DiscoveryScanResult {
   status: DiscoveryScanStatus;
   stage?: DiscoveryScanStage | null;
@@ -924,6 +1079,7 @@ export interface DiscoveryScanProgress extends DiscoveryScanResult {
   coverageUnavailable: boolean;
   error?: DiscoveryScanError | null;
   discoveryDiagnostics?: DiscoveryDiagnostics | null;
+  marketMetrics: DiscoveryMarketMetrics;
   startedAt: string;
   stageStartedAt: string;
   completedAt: string | null;
