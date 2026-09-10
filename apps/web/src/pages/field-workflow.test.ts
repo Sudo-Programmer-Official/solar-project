@@ -200,6 +200,14 @@ test("mobile lead actions stay compact and do not wrap in the shared page header
   assert.match(resultsSource, /:show-street-preview="false"/);
 });
 
+test("lead finder sorts business capacity low to high by default", async () => {
+  const source = await readFile(new URL("../components/LeadResultsTable.vue", import.meta.url), "utf8");
+
+  assert.match(source, /const sortKey = ref<SortKey>\("capacity"\)/);
+  assert.match(source, /const sortDirection = ref<SortDirection>\("asc"\)/);
+  assert.match(source, /nextKey === "capacity"/);
+});
+
 test("mobile bottom navigation keeps follow-ups available in the field workflow", async () => {
   const source = await readFile(new URL("../components/BottomNavigation.vue", import.meta.url), "utf8");
 

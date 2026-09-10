@@ -234,8 +234,8 @@ const localSearchQuery = ref("");
 const debouncedSearchQuery = ref("");
 const statusFilter = ref("ALL");
 const distanceFilter = ref("ALL");
-const sortKey = ref<SortKey>("opportunityScore");
-const sortDirection = ref<SortDirection>("desc");
+const sortKey = ref<SortKey>("capacity");
+const sortDirection = ref<SortDirection>("asc");
 const selectedPropertyId = ref<string | null>(null);
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -299,7 +299,7 @@ function sortBy(nextKey: SortKey) {
     return;
   }
   sortKey.value = nextKey;
-  sortDirection.value = nextKey === "address" || nextKey === "city" || nextKey === "status" ? "asc" : "desc";
+  sortDirection.value = nextKey === "address" || nextKey === "city" || nextKey === "status" || nextKey === "capacity" ? "asc" : "desc";
 }
 
 function isSelected(lead: DiscoveryScanLead) {
