@@ -125,6 +125,8 @@ export interface SolarAssessment {
   imageryDate?: string | null;
   imageryProcessedDate?: string | null;
   imageryQuality?: string | null;
+  imageryFreshness?: "FRESH" | "AGING" | "STALE" | "UNKNOWN";
+  imageryAgeMonths?: number | null;
   roofAreaMeters2?: number | null;
   groundAreaMeters2?: number | null;
   maxArrayAreaMeters2?: number | null;
@@ -434,6 +436,9 @@ export type DataQualityGrade = "A" | "B" | "C" | "D" | "UNKNOWN";
 export interface DataQualitySummary {
   grade: DataQualityGrade;
   confidence: number;
+  dataConfidenceScore: number;
+  imageryFreshness: "FRESH" | "AGING" | "STALE" | "UNKNOWN";
+  imageryAgeMonths: number | null;
   availableSignals: string[];
   missingSignals: string[];
   warnings: string[];
@@ -976,6 +981,16 @@ export interface DiscoveryScanMetrics {
   solarEnrichmentMs: number | null;
   totalScanMs: number | null;
   totalMs: number | null;
+  freshlyAnalyzedCount: number;
+  cachedAnalyzedCount: number;
+  preliminaryOnlyCount: number;
+  imageryFreshCount: number;
+  imageryAgingCount: number;
+  imageryStaleCount: number;
+  imageryUnknownCount: number;
+  potentialWhaleCount: number;
+  confirmedWhaleCount: number;
+  permitCreditCount: number;
 }
 
 export const DiscoveryCoverageCellStatus = {
@@ -1135,6 +1150,12 @@ export interface TodayLeadCard {
   whaleConfidence?: number | null;
   sunshineHours?: number | null;
   imageryQuality?: string | null;
+  imageryDate?: string | null;
+  imageryProcessedDate?: string | null;
+  imageryFreshness?: "FRESH" | "AGING" | "STALE" | "UNKNOWN";
+  imageryAgeMonths?: number | null;
+  dataConfidenceScore?: number | null;
+  whaleQualification?: "NONE" | "POTENTIAL_WHALE" | "POTENTIAL_MEGA_WHALE" | "WHALE" | "MEGA_WHALE";
   existingSolarStatus?: "DETECTED" | "NOT_DETECTED" | "UNKNOWN";
   permitCount?: number;
   nextAction: string;

@@ -55,7 +55,19 @@ test("market funnel prioritizes exclusions and verification before scores", () =
     whaleScore: 65,
     strongScore: 90,
     capacityKw: 22,
+    dataConfidenceScore: 80,
   }), "WHALE");
+  assert.equal(classifyMarketCandidate({
+    propertyUse: "SINGLE_FAMILY",
+    address: "3306 Pleasant Valley Blvd",
+    verificationStatus: "VERIFIED",
+    existingSolarStatus: "NOT_DETECTED",
+    solarScore: 90,
+    whaleScore: 65,
+    strongScore: 90,
+    capacityKw: 22,
+    dataConfidenceScore: 55,
+  }), "STRONG");
   assert.equal(classifyMarketCandidate({
     propertyUse: "COMMERCIAL",
     address: "1 Convention Center Dr, Example, PA",

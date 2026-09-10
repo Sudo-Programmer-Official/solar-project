@@ -121,7 +121,7 @@ function matchesGlobalFilters(
   lead: TodayLeadCard,
   filters: SearchFilters,
 ): boolean {
-  if (filters.whaleCandidates && lead.whaleScore < 60) {
+  if (filters.whaleCandidates && lead.whaleQualification !== "WHALE" && lead.whaleQualification !== "MEGA_WHALE") {
     return false;
   }
   if (filters.highPriority && lead.opportunityScore < 70) {

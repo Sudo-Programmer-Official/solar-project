@@ -105,7 +105,13 @@ import {
   emptyDiscoveryFunnelCounts,
   emptyDiscoverySaturation,
   emptyDiscoveryMarketMetrics,
+  getDiscoveryCapacityThresholds,
 } from "./market-intelligence";
+import {
+  getImageryAgeMonths,
+  getImageryFreshness,
+  type ImageryFreshness,
+} from "./data-quality";
 import { calculateWhaleScore, type WhaleScoreResult } from "../../../packages/scoring/src/index";
 import { recommendNextBestAction } from "../../../packages/lead-intelligence/src/index";
 import {
@@ -159,6 +165,7 @@ export interface AnalyzeResult {
   locationVerification: LocationVerificationSummary;
   opportunityAssessment: OpportunityAssessment;
   whaleScore: WhaleScoreResult;
+  whaleQualification?: NonNullable<TodayLeadCard["whaleQualification"]>;
   signals: PropertySignal[];
   opportunitySignals: OpportunitySignal[];
   visualSignals: PropertyVisualSignal[];
@@ -470,21 +477,27 @@ export async function analyzeProperty(
     repository,
   );
   const leadOutcome = await buildLeadOutcome(property, repository);
+  const locationVerification = buildLocationVerificationSummary(property, audit, env.locationMatchThresholdMeters ?? 10);
   const dataQuality = buildDataQualitySummary({
+    property,
     solarAssessment,
     usageProfile,
     propertySignals,
     permits: permitList,
     audit,
     warnings,
+    locationVerification,
   });
-  const locationVerification = buildLocationVerificationSummary(property, audit, env.locationMatchThresholdMeters ?? 10);
   const visualSignals = buildPropertyVisualSignals(solarAssessment, propertySignals, homeownerConfirmations);
   const conversationInsights = buildConversationInsights(visualSignals, homeownerConfirmations);
   const analysisBase: AnalyzeResult = {
     property,
     solar,
-    solarAssessment,
+    solarAssessment: {
+      ...solarAssessment,
+      imageryFreshness: dataQuality.imageryFreshness,
+      imageryAgeMonths: dataQuality.imageryAgeMonths,
+    },
     audit,
     scoreBreakdown,
     reasons,
@@ -497,6 +510,11 @@ export async function analyzeProperty(
     locationVerification,
     opportunityAssessment,
     whaleScore,
+    whaleQualification: qualifyWhale(
+      classifyDiscoveryCapacityBand(maxRoofSolarCapacityKw),
+      locationVerification.status,
+      dataQuality.dataConfidenceScore,
+    ),
     signals: propertySignals,
     opportunitySignals: [],
     visualSignals,
@@ -659,21 +677,27 @@ async function hydrateStoredAnalysis(
   const reasons = buildSolarReasons(solar, scoreBreakdown);
   const warnings = [...new Set(audit.warnings)];
   const verificationNeeded = warnings.length > 0 || solarAssessment.existingSolarStatus !== "NOT_DETECTED";
+  const locationVerification = buildLocationVerificationSummary(property, audit, env.locationMatchThresholdMeters ?? 10);
   const dataQuality = buildDataQualitySummary({
+    property,
     solarAssessment,
     usageProfile,
     propertySignals,
     permits: permitList,
     audit,
     warnings,
+    locationVerification,
   });
-  const locationVerification = buildLocationVerificationSummary(property, audit, env.locationMatchThresholdMeters ?? 10);
   const visualSignals = buildPropertyVisualSignals(solarAssessment, propertySignals, homeownerConfirmations);
   const conversationInsights = buildConversationInsights(visualSignals, homeownerConfirmations);
   const analysisBase: AnalyzeResult = {
     property,
     solar,
-    solarAssessment,
+    solarAssessment: {
+      ...solarAssessment,
+      imageryFreshness: dataQuality.imageryFreshness,
+      imageryAgeMonths: dataQuality.imageryAgeMonths,
+    },
     audit,
     scoreBreakdown,
     reasons,
@@ -686,6 +710,11 @@ async function hydrateStoredAnalysis(
     locationVerification,
     opportunityAssessment,
     whaleScore,
+    whaleQualification: qualifyWhale(
+      classifyDiscoveryCapacityBand(maxRoofSolarCapacityKw),
+      locationVerification.status,
+      dataQuality.dataConfidenceScore,
+    ),
     signals: propertySignals,
     opportunitySignals: [],
     visualSignals,
@@ -747,7 +776,7 @@ export async function getTodayDashboard(
   const combinedLeads = dedupeLeads(analyzedLeads);
   const summary = {
     priorityLeads: combinedLeads.filter((lead) => lead.opportunityScore >= 70).length,
-    whaleCandidates: combinedLeads.filter((lead) => lead.whaleScore >= 60).length,
+    whaleCandidates: combinedLeads.filter((lead) => lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE").length,
     revisits: combinedLeads.filter((lead) => lead.outcome === "REVISIT" || lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
     needsBill: combinedLeads.filter((lead) => lead.verificationNeeded.some((item) => item.toLowerCase().includes("bill"))).length,
     total: combinedLeads.length,
@@ -1353,6 +1382,16 @@ function createDiscoveryScanJob(scanId: string, input: DiscoveryScanInput): Disc
       solarEnrichmentMs: null,
       totalScanMs: null,
       totalMs: null,
+      freshlyAnalyzedCount: 0,
+      cachedAnalyzedCount: 0,
+      preliminaryOnlyCount: 0,
+      imageryFreshCount: 0,
+      imageryAgingCount: 0,
+      imageryStaleCount: 0,
+      imageryUnknownCount: 0,
+      potentialWhaleCount: 0,
+      confirmedWhaleCount: 0,
+      permitCreditCount: 0,
     },
     stages: [
       {
@@ -1761,13 +1800,51 @@ async function runDiscoveryScanJob(
           candidate.freshAnalysis = analyzed;
           candidate.solarAssessment = analyzed.solarAssessment;
           candidate.opportunityAssessment = analyzed.opportunityAssessment;
+          candidate.usageProfile = analyzed.usageProfile;
+          candidate.permits = analyzed.permits;
+          candidate.propertySignals = analyzed.signals;
           candidate.maxRoofSolarCapacityKw = analyzed.maxRoofSolarCapacityKw;
           candidate.confirmedAnnualUsageKwh = analyzed.confirmedAnnualUsageKwh;
           candidate.estimatedEnergyNeedKw = analyzed.estimatedEnergyNeedKw;
           candidate.verificationStatus = verificationStatusAfterSolarAnalysis(candidate, analyzed);
           candidate.rejectionReason = discoveryVerificationRejectionReason(candidate.verificationStatus, candidate.property, candidate.propertyUse);
           candidate.capacityBand = classifyDiscoveryCapacityBand(candidate.maxRoofSolarCapacityKw);
-          candidate.signals = analyzed.signals.map((signal) => signal.signalType.replaceAll("_", " "));
+          candidate.dataConfidenceScore = analyzed.dataQuality.dataConfidenceScore;
+          candidate.imageryFreshness = analyzed.dataQuality.imageryFreshness;
+          candidate.imageryAgeMonths = analyzed.dataQuality.imageryAgeMonths;
+          candidate.signals = deriveDiscoverySignals(
+            candidate.property,
+            candidate.market,
+            analyzed.signals,
+            analyzed.permits,
+            analyzed,
+            analyzed.solarAssessment,
+          );
+          candidate.cheapReasons = buildDiscoveryReasons({
+            property: candidate.property,
+            market: candidate.market,
+            discoverySource: candidate.discoverySource,
+            discoveryConfidence: candidate.discoveryConfidence,
+            permits: candidate.permits,
+            signals: candidate.signals,
+            opportunityAssessment: candidate.opportunityAssessment,
+            freshAnalysis: analyzed,
+            maxRoofSolarCapacityKw: candidate.maxRoofSolarCapacityKw,
+            confirmedAnnualUsageKwh: candidate.confirmedAnnualUsageKwh,
+          });
+          candidate.cheapScore = buildDiscoveryScore({
+            market: candidate.market,
+            discoverySource: candidate.discoverySource,
+            discoveryConfidence: candidate.discoveryConfidence,
+            permits: candidate.permits,
+            propertySignals: candidate.propertySignals,
+            opportunityAssessment: candidate.opportunityAssessment,
+            freshAnalysis: analyzed,
+            leadOutcome: candidate.leadOutcome,
+            usageProfile: candidate.usageProfile,
+            maxRoofSolarCapacityKw: candidate.maxRoofSolarCapacityKw,
+          });
+          candidate.routeReason = candidate.cheapReasons[0] ?? candidate.routeReason;
           analyzedCount += 1;
         } catch (error) {
           const warning = classifySolarAnalysisFailure(
@@ -1785,6 +1862,16 @@ async function runDiscoveryScanJob(
         candidate.verificationStatus = inferDiscoveryVerificationStatus(candidate.property, candidate.propertyUse, candidate.solarAssessment);
         candidate.rejectionReason = discoveryVerificationRejectionReason(candidate.verificationStatus, candidate.property, candidate.propertyUse);
         candidate.capacityBand = classifyDiscoveryCapacityBand(candidate.maxRoofSolarCapacityKw);
+        candidate.dataConfidenceScore = calculateCandidateDataConfidenceScore({
+          property: candidate.property,
+          solarAssessment: candidate.solarAssessment,
+          usageProfile: candidate.usageProfile,
+          permits: candidate.permits,
+          propertySignals: candidate.propertySignals,
+          discoveryConfidence: candidate.discoveryConfidence,
+        });
+        candidate.imageryFreshness = getImageryFreshness(candidate.solarAssessment?.imageryDate);
+        candidate.imageryAgeMonths = getImageryAgeMonths(candidate.solarAssessment?.imageryDate);
         nextLead = buildPendingDiscoveryResult(candidate, nextAction, "CACHED");
         if (!isInitialBatch) {
           analyzedCount += 1;
@@ -1823,7 +1910,7 @@ async function runDiscoveryScanJob(
                 solarCalls: googleSolarCalls,
                 estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
                 largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
-                whaleCandidates: results.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
+                whaleCandidates: buildDiscoveryEvidenceMetrics(results).confirmedWhaleCount,
               },
               marketMetrics: currentMarketMetrics,
               estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
@@ -1859,7 +1946,7 @@ async function runDiscoveryScanJob(
             solarCalls: googleSolarCalls,
             estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
             largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
-            whaleCandidates: results.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
+            whaleCandidates: buildDiscoveryEvidenceMetrics(results).confirmedWhaleCount,
           },
         },
         {
@@ -1961,7 +2048,7 @@ async function runDiscoveryScanJob(
           solarCalls: googleSolarCalls,
           solarCallBudget: maxGoogleSolarCalls,
           largeOpportunities: results.filter((lead) => lead.opportunityScore >= 70).length,
-          whaleCandidates: results.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
+          whaleCandidates: buildDiscoveryEvidenceMetrics(results).confirmedWhaleCount,
           resultsFound: uniqueResults.length,
           estimatedCostUsd: roundDecimal(googleSolarCalls * 0.02, 2),
           providerCalls,
@@ -1978,6 +2065,7 @@ async function runDiscoveryScanJob(
           totalScanMs,
           finalRankingMs,
           totalMs: totalScanMs,
+          ...buildDiscoveryEvidenceMetrics(uniqueResults),
         },
       },
       {
@@ -2117,6 +2205,24 @@ function countQualifiedDiscoveryLeads(results: DiscoveryScanLead[]): number {
   ).length;
 }
 
+function buildDiscoveryEvidenceMetrics(results: DiscoveryScanLead[]) {
+  const countByStatus = (status: DiscoveryScanLead["analysisStatus"]) => results.filter((lead) => lead.analysisStatus === status).length;
+  const countByFreshness = (freshness: NonNullable<DiscoveryScanLead["imageryFreshness"]>) => results.filter((lead) => lead.imageryFreshness === freshness).length;
+  const confirmedWhaleCount = results.filter((lead) => lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE").length;
+  return {
+    freshlyAnalyzedCount: countByStatus("ANALYZED"),
+    cachedAnalyzedCount: countByStatus("CACHED"),
+    preliminaryOnlyCount: countByStatus("ANALYZING"),
+    imageryFreshCount: countByFreshness("FRESH"),
+    imageryAgingCount: countByFreshness("AGING"),
+    imageryStaleCount: countByFreshness("STALE"),
+    imageryUnknownCount: countByFreshness("UNKNOWN"),
+    potentialWhaleCount: results.filter((lead) => lead.whaleQualification === "POTENTIAL_WHALE" || lead.whaleQualification === "POTENTIAL_MEGA_WHALE").length,
+    confirmedWhaleCount,
+    permitCreditCount: results.filter((lead) => lead.badges.some((badge) => badge.label === "PUBLIC RECORD")).length,
+  };
+}
+
 function dedupeDiscoveryCandidates(candidates: DiscoveryCandidateRecord[]): DiscoveryCandidateRecord[] {
   const deduped: DiscoveryCandidateRecord[] = [];
   for (const candidate of candidates) {
@@ -2191,6 +2297,9 @@ interface DiscoveryCandidateRecord {
   verificationStatus: "VERIFIED" | "REVIEW" | "REJECTED" | "UNKNOWN";
   rejectionReason: string | null;
   capacityBand: DiscoveryScanLead["capacityBand"];
+  dataConfidenceScore: number;
+  imageryFreshness: ImageryFreshness;
+  imageryAgeMonths: number | null;
   funnelBucket?: DiscoveryFunnelBucket;
   nearbyPropertyCount: number;
   nearbyVerifiedCount: number;
@@ -2238,6 +2347,14 @@ function buildDiscoveryCandidateRecordLite(
     maxRoofSolarCapacityKw: estimatedCapacity,
   });
   const verificationStatus = inferDiscoveryVerificationStatus(property, propertyUse, null);
+  const dataConfidenceScore = calculateCandidateDataConfidenceScore({
+    property,
+    solarAssessment: null,
+    usageProfile: null,
+    permits: [],
+    propertySignals: [],
+    discoveryConfidence: null,
+  });
   return {
     property,
     distanceMiles,
@@ -2265,12 +2382,64 @@ function buildDiscoveryCandidateRecordLite(
     verificationStatus,
     rejectionReason: discoveryVerificationRejectionReason(verificationStatus, property, propertyUse),
     capacityBand: classifyDiscoveryCapacityBand(estimatedCapacity),
+    dataConfidenceScore,
+    imageryFreshness: "UNKNOWN",
+    imageryAgeMonths: null,
     nearbyPropertyCount: 0,
     nearbyVerifiedCount: 0,
     nearbyStrongCount: 0,
     nearbyWhaleCount: 0,
     nearbyCountsByRadius: {},
   };
+}
+
+function calculateCandidateDataConfidenceScore(input: {
+  property: Property;
+  solarAssessment: SolarAssessment | null;
+  usageProfile: UsageProfile | null;
+  permits: PermitRecord[];
+  propertySignals: PropertySignal[];
+  discoveryConfidence: number | null;
+}): number {
+  const imageryFreshness = getImageryFreshness(input.solarAssessment?.imageryDate);
+  const qualityFactor = input.solarAssessment?.imageryQuality === "HIGH"
+    ? 1
+    : input.solarAssessment?.imageryQuality === "MEDIUM"
+      ? 0.8
+      : input.solarAssessment?.imageryQuality === "LOW"
+        ? 0.55
+        : 0;
+  const freshnessFactor = imageryFreshness === "FRESH" ? 1 : imageryFreshness === "AGING" ? 0.7 : imageryFreshness === "STALE" ? 0.3 : 0;
+  let score = Math.round(20 * qualityFactor * freshnessFactor);
+  score += input.property.street || input.property.normalizedAddress ? 5 : 0;
+  score += input.property.latitude != null && input.property.longitude != null ? 5 : 0;
+  score += input.property.city && input.property.state && input.property.postalCode ? 6 : input.property.state ? 3 : 0;
+  score += input.property.parcelId || input.property.municipality || input.property.county ? 4 : 0;
+  score += input.solarAssessment?.roofAreaMeters2 != null ? 5 : 0;
+  score += input.solarAssessment?.maxArrayPanelsCount != null ? 5 : 0;
+  score += input.solarAssessment?.estimatedMaxSystemKw != null ? 5 : 0;
+  score += input.solarAssessment?.estimatedAnnualProductionKwh != null ? 10 : 0;
+  score += input.solarAssessment?.solarFitConfidence != null && input.solarAssessment.solarFitConfidence >= 70 ? 5 : 0;
+  score += input.permits.some(isTrustedPermit) ? 10 : 0;
+  score += input.usageProfile?.annualUsageKwh != null ? 7 : input.usageProfile?.monthlyBillAverage != null ? 3 : 0;
+  score += Math.min(4, input.propertySignals.length);
+  score += Math.min(10, Math.max(0, Math.round((input.discoveryConfidence ?? 0) / 10)));
+  return clampPercent(Math.min(100, score));
+}
+
+type WhaleQualification = NonNullable<TodayLeadCard["whaleQualification"]>;
+
+function qualifyWhale(
+  capacityBand: DiscoveryScanLead["capacityBand"],
+  verificationStatus: DiscoveryScanLead["verificationStatus"] | "MISMATCH",
+  dataConfidenceScore: number | null | undefined,
+): WhaleQualification {
+  if (capacityBand !== "WHALE" && capacityBand !== "MEGA_WHALE") return "NONE";
+  const thresholds = getDiscoveryCapacityThresholds();
+  if (verificationStatus === "VERIFIED" && (dataConfidenceScore ?? 0) >= thresholds.whaleDataConfidence) {
+    return capacityBand;
+  }
+  return capacityBand === "MEGA_WHALE" ? "POTENTIAL_MEGA_WHALE" : "POTENTIAL_WHALE";
 }
 
 async function buildDiscoveryCandidates(
@@ -3206,11 +3375,11 @@ function buildDiscoveryOpportunitySignals(candidate: DiscoveryCandidateRecord): 
     });
   }
 
-  if (candidate.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED")) {
+  if (candidate.permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED")) {
     signals.push({
       code: "recent_roof_permit",
       category: "PERMIT",
-      label: "Recent roof permit",
+      label: "Recent verified roof permit",
       value: true,
       unit: null,
       source: "permit_feed",
@@ -3371,6 +3540,14 @@ function buildDiscoveryCandidateRecord(
     maxRoofSolarCapacityKw,
   });
   const verificationStatus = inferDiscoveryVerificationStatus(property, propertyUse, solarAssessment);
+  const dataConfidenceScore = calculateCandidateDataConfidenceScore({
+    property,
+    solarAssessment,
+    usageProfile,
+    permits,
+    propertySignals,
+    discoveryConfidence: latestDiscovery?.confidence ?? null,
+  });
 
   return {
     property,
@@ -3399,6 +3576,9 @@ function buildDiscoveryCandidateRecord(
     verificationStatus,
     rejectionReason: discoveryVerificationRejectionReason(verificationStatus, property, propertyUse),
     capacityBand: classifyDiscoveryCapacityBand(maxRoofSolarCapacityKw),
+    dataConfidenceScore,
+    imageryFreshness: getImageryFreshness(solarAssessment?.imageryDate),
+    imageryAgeMonths: getImageryAgeMonths(solarAssessment?.imageryDate),
     nearbyPropertyCount: 0,
     nearbyVerifiedCount: 0,
     nearbyStrongCount: 0,
@@ -3562,6 +3742,7 @@ function buildDiscoveryMarketMetrics(input: {
       whaleScore: lead?.whaleScore ?? candidate.opportunityAssessment?.whaleScore ?? null,
       strongScore: lead?.opportunityScore ?? propertyOpportunityScore(candidate),
       capacityKw: candidate.maxRoofSolarCapacityKw,
+      dataConfidenceScore: candidate.dataConfidenceScore,
     });
     candidate.funnelBucket = bucket;
     if (lead) {
@@ -3569,6 +3750,10 @@ function buildDiscoveryMarketMetrics(input: {
       lead.funnelBucket = bucket;
       lead.solarScore = solarScore ?? undefined;
       lead.capacityBand = candidate.capacityBand;
+      lead.dataConfidenceScore = candidate.dataConfidenceScore;
+      lead.imageryFreshness = candidate.imageryFreshness;
+      lead.imageryAgeMonths = candidate.imageryAgeMonths;
+      lead.whaleQualification = qualifyWhale(candidate.capacityBand, candidate.verificationStatus, candidate.dataConfidenceScore);
       lead.rejectionReason = candidate.rejectionReason;
       lead.nearbyPropertyCount = candidate.nearbyPropertyCount;
       lead.nearbyVerifiedCount = candidate.nearbyVerifiedCount;
@@ -3998,7 +4183,7 @@ function applyDiscoveryFilters(
     if (largeLot && !candidateHasDetectedVisualSignal(candidate, "LARGE_LOT", ["Large lot", "Large property"])) {
       return false;
     }
-    if (recentRoofPermit && !candidate.signals.includes("Recent roof permit")) {
+    if (recentRoofPermit && !candidate.signals.includes("Recent verified roof permit")) {
       return false;
     }
     if (highValueArea && candidate.market?.medianHomeValueBand == null) {
@@ -4071,6 +4256,12 @@ function mapDiscoveryResult(
     propertyOpportunityScore: scoreEligible ? Math.round(propertyOpportunityScore(candidate)) : 0,
     solarOpportunityScore: scoreEligible ? Math.round(solarOpportunityScore(candidate)) : 0,
     solarScore: Math.round(analysis.solarAssessment.solarFitScore),
+    dataConfidenceScore: analysis.dataQuality.dataConfidenceScore,
+    imageryDate: analysis.solarAssessment.imageryDate ?? null,
+    imageryProcessedDate: analysis.solarAssessment.imageryProcessedDate ?? null,
+    imageryFreshness: analysis.dataQuality.imageryFreshness,
+    imageryAgeMonths: analysis.dataQuality.imageryAgeMonths,
+    whaleQualification: qualifyWhale(candidate.capacityBand, candidate.verificationStatus, analysis.dataQuality.dataConfidenceScore),
     verificationStatus: candidate.verificationStatus,
     funnelBucket: candidate.funnelBucket,
     capacityBand: candidate.capacityBand,
@@ -4132,8 +4323,14 @@ function buildPendingDiscoveryResult(
     estimatedAnnualProductionKwh: solarAssessment?.estimatedAnnualProductionKwh ?? null,
     sunshineHours: solarAssessment?.maxSunshineHoursPerYear ?? null,
     imageryQuality: solarAssessment?.imageryQuality ?? "UNKNOWN",
+    imageryDate: solarAssessment?.imageryDate ?? null,
+    imageryProcessedDate: solarAssessment?.imageryProcessedDate ?? null,
+    imageryFreshness: candidate.imageryFreshness,
+    imageryAgeMonths: candidate.imageryAgeMonths,
+    dataConfidenceScore: candidate.dataConfidenceScore,
+    whaleQualification: qualifyWhale(candidate.capacityBand, candidate.verificationStatus, candidate.dataConfidenceScore),
     existingSolarStatus: solarAssessment?.existingSolarStatus ?? "UNKNOWN",
-    permitCount: candidate.permits.length,
+    permitCount: candidate.permits.filter(isTrustedPermit).length,
     nextAction: nextAction.label,
     nextBestAction: nextAction,
     reasons: candidate.cheapReasons,
@@ -4177,12 +4374,22 @@ function buildPendingDiscoveryResult(
 
 function deriveCheapBadges(candidate: DiscoveryCandidateRecord): LeadSignalBadge[] {
   const badges: LeadSignalBadge[] = [];
-  if (candidate.capacityBand === "MEGA_WHALE" || candidate.capacityBand === "WHALE") {
-    badges.push({ label: candidate.capacityBand === "MEGA_WHALE" ? "MEGA WHALE" : "WHALE", tone: "MODEL" });
+  const whaleQualification = qualifyWhale(candidate.capacityBand, candidate.verificationStatus, candidate.dataConfidenceScore);
+  if (whaleQualification !== "NONE") {
+    badges.push({
+      label: whaleQualification === "MEGA_WHALE"
+        ? "MEGA WHALE"
+        : whaleQualification === "POTENTIAL_MEGA_WHALE"
+          ? "POTENTIAL MEGA WHALE"
+          : whaleQualification === "POTENTIAL_WHALE"
+            ? "POTENTIAL WHALE"
+            : "WHALE",
+      tone: "MODEL",
+    });
   } else if (candidate.capacityBand === "LARGE") {
     badges.push({ label: "LARGE", tone: "MODEL" });
   }
-  if (candidate.signals.includes("Recent roof permit")) {
+  if (candidate.signals.includes("Recent verified roof permit")) {
     badges.push({ label: "PUBLIC RECORD", tone: "PUBLIC_RECORD" });
   }
   if (candidate.confirmedAnnualUsageKwh == null) {
@@ -4228,7 +4435,7 @@ function buildDiscoveryReasons(input: {
     input.freshAnalysis ? `Fresh solar assessment already available` : null,
     input.maxRoofSolarCapacityKw != null ? `Roof capacity around ${formatNumber(input.maxRoofSolarCapacityKw)} kW` : null,
     input.confirmedAnnualUsageKwh != null ? `Confirmed usage ${formatNumber(input.confirmedAnnualUsageKwh)} kWh/year` : null,
-    input.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED") ? "Recent roof permit" : null,
+    input.permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED") ? "Recent verified roof permit" : null,
     input.market?.medianHomeValueBand === "HIGH" || input.market?.medianHomeValueBand === "VERY_HIGH" ? "High-value area" : null,
     input.signals.includes("Pool signal") ? "Pool signal" : null,
     input.signals.includes("Existing solar") ? "Existing solar detected" : null,
@@ -4279,7 +4486,7 @@ function buildDiscoveryScore(input: {
   if (input.market?.solarSaturation === "LOW") {
     score += 8;
   }
-  if (input.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED")) {
+  if (input.permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED")) {
     score += 10;
   }
   if (input.propertySignals.some((signal) => signal.signalType === "POOL_VISIBLE")) {
@@ -4363,8 +4570,8 @@ function deriveDiscoverySignals(
   if (solarAssessment?.existingSolarStatus === "DETECTED") {
     labels.add("Existing solar");
   }
-  if (signals.some((signal) => signal.signalType === "RECENT_ROOF_PERMIT") || permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED")) {
-    labels.add("Recent roof permit");
+  if (signals.some((signal) => signal.signalType === "RECENT_ROOF_PERMIT") || permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED")) {
+    labels.add("Recent verified roof permit");
   }
   if (signals.some((signal) => signal.signalType === "POOL_VISIBLE")) {
     labels.add("Pool signal");
@@ -4595,7 +4802,7 @@ function buildDealBrief(result: AnalyzeResult): DealBrief {
     ...result.signals.map((signal) => signalLabel(signal.signalType)),
     result.solarAssessment.existingSolarStatus === "DETECTED" ? "Existing solar" : null,
     result.usageProfile.annualUsageKwh != null ? `Usage confirmed at ${formatNumber(result.usageProfile.annualUsageKwh)} kWh/year` : "Usage unknown",
-    result.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED") ? "Recent roof permit" : null,
+    result.permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED") ? "Recent verified roof permit" : null,
   ].filter((value): value is string => Boolean(value));
   const conversationHistory = [
     result.leadOutcome.notes ?? "No conversation notes yet.",
@@ -4802,7 +5009,8 @@ function isCacheableAudit(audit: SolarAssessmentAudit): boolean {
     audit.missingFields.length === 0 &&
     audit.returnedBuildingCenter != null &&
     audit.selectedProductionConfig != null &&
-    audit.detectedArrayStatus !== "UNKNOWN"
+    audit.detectedArrayStatus !== "UNKNOWN" &&
+    getImageryFreshness(audit.imageryDate) !== "STALE"
   );
 }
 
@@ -5181,27 +5389,18 @@ function buildConversationInsights(
 }
 
 async function buildPermits(property: Property, repository: SolarRepository): Promise<PermitRecord[]> {
-  const now = new Date().toISOString();
-  const records: PermitRecord[] = [
-    {
-      id: stableId(`${property.id}:permit:roof`),
-      propertyId: property.id,
-      municipality: property.municipality ?? "Unknown municipality",
-      county: property.county ?? "Westmoreland",
-      state: property.state ?? "PA",
-      permitNumber: "R-2026-001",
-      permitType: "ROOF",
-      status: "ISSUED",
-      applicationDate: "2026-07-12",
-      issuedDate: "2026-07-18",
-      contractorName: "Sample Roofing LLC",
-      sourceProvider: "manual_seed",
-      sourceUrl: null,
-      confidence: 0.8,
-      retrievedAt: now,
-    },
-  ];
-  return repository.replacePermitRecords(property.id, records);
+  // Permit records are evidence, not seed data. Analysis must never create a
+  // permit simply because a property was scanned.
+  void property;
+  return repository.listPermits(property.id);
+}
+
+function isTrustedPermit(permit: PermitRecord): boolean {
+  const provider = permit.sourceProvider.trim().toLowerCase();
+  if (!provider || ["manual_seed", "fixture", "demo"].includes(provider)) return false;
+  if (permit.confidence < 0.7) return false;
+  const trustedProvider = /arcgis|open[ _-]?data|public[ _-]?(record|permit|data)|municipal|manual[ _-]?verified|verified/.test(provider);
+  return trustedProvider && Boolean(permit.sourceUrl || permit.permitNumber);
 }
 
 async function buildOpportunityAssessment(
@@ -5212,8 +5411,9 @@ async function buildOpportunityAssessment(
   permitRecords: PermitRecord[],
   repository: SolarRepository,
 ): Promise<OpportunityAssessment> {
-  const roofPermitRecent = permitRecords.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED");
-  const permitSignalScore = roofPermitRecent ? 72 : 30;
+  const trustedPermits = permitRecords.filter(isTrustedPermit);
+  const roofPermitRecent = trustedPermits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED");
+  const permitSignalScore = roofPermitRecent ? 72 : trustedPermits.length > 0 ? 30 : 0;
   const usageOpportunityScore = whaleScore.whaleScore;
   const systemSizeScore = Math.round(Math.min(100, (solarAssessment.estimatedMaxSystemKw ?? 0) * 7));
   const fieldPriorityScore = Math.round(
@@ -5247,7 +5447,7 @@ async function buildOpportunityAssessment(
     explanationJson: {
       reasons: [
         `Solar fit score ${solarAssessment.solarFitScore}`,
-        roofPermitRecent ? "Recent roof permit suggests newer roof work" : "No recent roof permit observed",
+        roofPermitRecent ? "Recent verified roof permit suggests newer roof work" : "No verified roof permit observed",
         ...whaleScore.reasons,
       ],
       verify: whaleScore.verificationNeeded,
@@ -5323,8 +5523,18 @@ function mapAnalyzeResultToLeadCard(result: AnalyzeResult, isDemo: boolean): Tod
     estimatedAnnualProductionKwh: result.solarAssessment.estimatedAnnualProductionKwh ?? null,
     sunshineHours: result.solarAssessment.maxSunshineHoursPerYear ?? null,
     imageryQuality: result.solarAssessment.imageryQuality ?? null,
+    imageryDate: result.solarAssessment.imageryDate ?? null,
+    imageryProcessedDate: result.solarAssessment.imageryProcessedDate ?? null,
+    imageryFreshness: result.dataQuality.imageryFreshness,
+    imageryAgeMonths: result.dataQuality.imageryAgeMonths,
+    dataConfidenceScore: result.dataQuality.dataConfidenceScore,
+    whaleQualification: qualifyWhale(
+      classifyDiscoveryCapacityBand(result.maxRoofSolarCapacityKw),
+      result.locationVerification.status,
+      result.dataQuality.dataConfidenceScore,
+    ),
     existingSolarStatus: result.solarAssessment.existingSolarStatus,
-    permitCount: result.permits.length,
+    permitCount: result.permits.filter(isTrustedPermit).length,
     nextAction: nextBestAction.label,
     nextBestAction,
     reasons,
@@ -5346,7 +5556,7 @@ function deriveSignalLabels(result: AnalyzeResult): string[] {
   if ((result.solarAssessment.maxArrayPanelsCount ?? 0) >= 20) labels.add("Large roof");
   if ((result.solarAssessment.maxSunshineHoursPerYear ?? 0) >= 1300) labels.add("Strong sunlight");
   if (result.solarAssessment.existingSolarStatus === "DETECTED") labels.add("Existing solar");
-  if (result.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED")) labels.add("Recent roof permit");
+  if (result.permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED")) labels.add("Recent verified roof permit");
   if (result.visualSignals.some((signal) => signal.type === "POOL" && signal.status === "DETECTED")) labels.add("Pool detected");
   if (result.visualSignals.some((signal) => signal.type === "LARGE_ROOF" && signal.status === "DETECTED")) labels.add("Large roof");
   if (result.visualSignals.some((signal) => signal.type === "LOW_SHADE" && signal.status === "DETECTED")) labels.add("Low shade");
@@ -5400,7 +5610,7 @@ function deriveNextAction(
   if (result.whaleScore.whaleScore >= 70 || result.opportunityAssessment.overallOpportunityScore >= 75) {
     return "OPEN";
   }
-  if (signals.includes("Recent roof permit")) return "OPEN";
+  if (signals.includes("Recent verified roof permit")) return "OPEN";
   return "GET BILL";
 }
 
@@ -5410,8 +5620,22 @@ function deriveBadges(
   verificationNeeded: string[],
 ): LeadSignalBadge[] {
   const badges: LeadSignalBadge[] = [];
-  if (result.whaleScore.whaleScore >= 60) {
-    badges.push({ label: "WHALE", tone: "MODEL" });
+  const whaleQualification = qualifyWhale(
+    classifyDiscoveryCapacityBand(result.maxRoofSolarCapacityKw),
+    result.locationVerification.status,
+    result.dataQuality.dataConfidenceScore,
+  );
+  if (whaleQualification !== "NONE") {
+    badges.push({
+      label: whaleQualification === "MEGA_WHALE"
+        ? "MEGA WHALE"
+        : whaleQualification === "POTENTIAL_MEGA_WHALE"
+          ? "POTENTIAL MEGA WHALE"
+          : whaleQualification === "POTENTIAL_WHALE"
+            ? "POTENTIAL WHALE"
+            : "WHALE",
+      tone: "MODEL",
+    });
   }
   if (result.opportunityAssessment.overallOpportunityScore >= 70) {
     badges.push({ label: "HIGH PRIORITY", tone: "MODEL" });
@@ -5419,7 +5643,7 @@ function deriveBadges(
   if (result.solarAssessment.existingSolarStatus === "DETECTED") {
     badges.push({ label: "EXISTING SOLAR", tone: "GOOGLE_SOLAR" });
   }
-  if (signals.includes("Recent roof permit")) {
+  if (signals.includes("Recent verified roof permit")) {
     badges.push({ label: "PUBLIC RECORD", tone: "PUBLIC_RECORD" });
   }
   if (verificationNeeded.length > 0) {
@@ -5533,7 +5757,7 @@ function determineDealStage(result: AnalyzeResult): DealStage {
     case "INSTALLED":
       return "PTO";
     default:
-      if (result.permits.some((permit) => permit.permitType === "ROOF" && permit.status === "ISSUED")) {
+      if (result.permits.some((permit) => isTrustedPermit(permit) && permit.permitType === "ROOF" && permit.status === "ISSUED")) {
         return "PERMITTING";
       }
       if ((result.solarAssessment.estimatedMaxSystemKw ?? 0) > 0) {
@@ -5548,7 +5772,7 @@ function isUnreviewedOutcome(outcome: LeadOutcome["outcome"]): boolean {
 }
 
 function pendingPermitDays(permits: PermitRecord[]): number | null {
-  const pending = permits.find((permit) => permit.status === "PENDING" && permit.applicationDate);
+  const pending = permits.find((permit) => isTrustedPermit(permit) && permit.status === "PENDING" && permit.applicationDate);
   if (!pending?.applicationDate) {
     return null;
   }
@@ -6135,13 +6359,18 @@ function estimateEnergyNeedKw(confirmedAnnualUsageKwh: number | null): number | 
 }
 
 function buildDataQualitySummary(input: {
+  property: Property;
   solarAssessment: SolarAssessment;
   usageProfile: UsageProfile;
   propertySignals: PropertySignal[];
   permits: PermitRecord[];
   audit: SolarAssessmentAudit;
   warnings: string[];
+  locationVerification: LocationVerificationSummary;
 }): DataQualitySummary {
+  const imageryFreshness = getImageryFreshness(input.solarAssessment.imageryDate);
+  const imageryAgeMonths = getImageryAgeMonths(input.solarAssessment.imageryDate);
+  const trustedPermits = input.permits.filter(isTrustedPermit);
   const availableSignals = [
     "google_solar",
     input.solarAssessment.imageryDate != null ? "imagery_date" : null,
@@ -6151,7 +6380,7 @@ function buildDataQualitySummary(input: {
     input.solarAssessment.existingSolarStatus !== "UNKNOWN" ? "existing_solar" : null,
     input.usageProfile.annualUsageKwh != null ? "confirmed_usage" : null,
     input.propertySignals.length > 0 ? "property_signals" : null,
-    input.permits.length > 0 ? "permit_history" : null,
+    trustedPermits.length > 0 ? "permit_history" : null,
     input.audit.returnedBuildingCenter != null ? "geocoded_location" : null,
   ].filter((signal): signal is string => Boolean(signal));
 
@@ -6162,14 +6391,16 @@ function buildDataQualitySummary(input: {
     input.solarAssessment.existingSolarStatus === "UNKNOWN" ? "existing_solar" : null,
     input.usageProfile.annualUsageKwh == null ? "confirmed_usage" : null,
     input.propertySignals.length === 0 ? "property_signals" : null,
-    input.permits.length === 0 ? "permit_history" : null,
+    trustedPermits.length === 0 ? "permit_history" : null,
     "shade",
   ].filter((signal): signal is string => Boolean(signal));
 
-  const completeness = availableSignals.length + missingSignals.length > 0
-    ? Math.round((availableSignals.length / (availableSignals.length + missingSignals.length)) * 100)
-    : 0;
-  const confidence = clampPercent(Math.round((input.solarAssessment.solarFitConfidence + completeness) / 2));
+  const dataConfidenceScore = calculateDataConfidenceScore({
+    ...input,
+    imageryFreshness,
+    trustedPermits,
+  });
+  const confidence = dataConfidenceScore;
 
   const grade: DataQualitySummary["grade"] =
     confidence >= 85 ? "A" :
@@ -6181,15 +6412,64 @@ function buildDataQualitySummary(input: {
   const warnings = [...new Set([
     ...input.warnings,
     missingSignals.includes("shade") ? "Shade is unknown and should not be inferred from sunshine-hours." : null,
+    imageryFreshness === "STALE" ? "Imagery is over 36 months old and should be refreshed before treating the estimate as current." : null,
+    input.permits.some((permit) => !isTrustedPermit(permit)) ? "Unverified permit records are excluded from scoring." : null,
   ].filter((value): value is string => Boolean(value)))];
 
   return {
     grade,
     confidence,
+    dataConfidenceScore,
+    imageryFreshness,
+    imageryAgeMonths,
     availableSignals,
     missingSignals,
     warnings,
   };
+}
+
+function calculateDataConfidenceScore(input: {
+  property: Property;
+  solarAssessment: SolarAssessment;
+  usageProfile: UsageProfile;
+  propertySignals: PropertySignal[];
+  audit: SolarAssessmentAudit;
+  locationVerification: LocationVerificationSummary;
+  imageryFreshness: ImageryFreshness;
+  trustedPermits: PermitRecord[];
+}): number {
+  const qualityFactor = input.solarAssessment.imageryQuality === "HIGH"
+    ? 1
+    : input.solarAssessment.imageryQuality === "MEDIUM"
+      ? 0.8
+      : input.solarAssessment.imageryQuality === "LOW"
+        ? 0.55
+        : 0.35;
+  const freshnessFactor = input.imageryFreshness === "FRESH"
+    ? 1
+    : input.imageryFreshness === "AGING"
+      ? 0.7
+      : input.imageryFreshness === "STALE"
+        ? 0.3
+        : 0;
+
+  let score = Math.round(20 * qualityFactor * freshnessFactor);
+  score += input.property.street || input.property.normalizedAddress ? 5 : 0;
+  score += input.property.latitude != null && input.property.longitude != null ? 5 : 0;
+  score += input.locationVerification.status === "VERIFIED" ? 5 : input.locationVerification.status === "REVIEW" ? 2 : 0;
+  score += input.property.city && input.property.state && input.property.postalCode ? 6 : input.property.state ? 3 : 0;
+  score += input.property.parcelId || input.property.municipality || input.property.county ? 4 : 0;
+  score += input.solarAssessment.roofAreaMeters2 != null ? 5 : 0;
+  score += input.solarAssessment.maxArrayPanelsCount != null ? 5 : 0;
+  score += input.solarAssessment.estimatedMaxSystemKw != null ? 5 : 0;
+  score += input.audit.selectedProductionConfig != null ? 5 : 0;
+  score += input.solarAssessment.estimatedAnnualProductionKwh != null ? 5 : 0;
+  score += input.audit.roofSegmentCount > 0 ? 5 : 0;
+  score += input.solarAssessment.solarFitConfidence >= 70 ? 5 : input.solarAssessment.solarFitConfidence >= 45 ? 2 : 0;
+  score += input.trustedPermits.length > 0 ? 10 : 0;
+  score += input.usageProfile.annualUsageKwh != null ? 7 : input.usageProfile.monthlyBillAverage != null ? 3 : 0;
+  score += input.propertySignals.length > 0 ? Math.min(4, input.propertySignals.length) : 0;
+  return clampPercent(Math.min(100, score));
 }
 
 function buildLocationVerificationSummary(

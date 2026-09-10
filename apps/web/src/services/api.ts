@@ -295,6 +295,7 @@ export interface PropertyDetailPayload {
     reasons: string[];
     verificationNeeded: string[];
   };
+  whaleQualification?: "NONE" | "POTENTIAL_WHALE" | "POTENTIAL_MEGA_WHALE" | "WHALE" | "MEGA_WHALE";
   signals: Array<{
     signalType: string;
     source: string;
@@ -340,6 +341,9 @@ export interface PropertyDetailPayload {
   dataQuality: {
     grade: string;
     confidence: number;
+    dataConfidenceScore: number;
+    imageryFreshness: "FRESH" | "AGING" | "STALE" | "UNKNOWN";
+    imageryAgeMonths: number | null;
     availableSignals: string[];
     missingSignals: string[];
     warnings: string[];

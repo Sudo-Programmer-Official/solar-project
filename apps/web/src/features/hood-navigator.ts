@@ -57,8 +57,8 @@ export function buildNavigatorClusters(
   return [...grouped.entries()].map(([clusterId, clusterLeads]) => {
     const center = centroid(clusterLeads, scanCenter);
     const strongLeadCount = clusterLeads.filter((lead) => lead.opportunityScore >= 70).length;
-    const whaleCount = clusterLeads.filter((lead) => lead.whaleScore >= 60).length;
-    const megaWhaleCount = clusterLeads.filter((lead) => lead.capacityBand === "MEGA_WHALE").length;
+    const whaleCount = clusterLeads.filter((lead) => lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE").length;
+    const megaWhaleCount = clusterLeads.filter((lead) => lead.whaleQualification === "MEGA_WHALE").length;
     const averageOpportunityScore = average(clusterLeads.map((lead) => lead.opportunityScore));
     const averageCapacityKw = averageNullable(clusterLeads.map((lead) => lead.maxRoofSolarCapacityKw));
     const densityScore = Math.min(100, Math.round((clusterLeads.length / 10) * 100));
@@ -87,8 +87,8 @@ export function buildNavigatorClusters(
       distanceMilesFromScanCenter: distanceMiles(center, scanCenter),
       propertyIds: clusterLeads.map((lead) => lead.propertyId ?? lead.id),
       strongPropertyIds: clusterLeads.filter((lead) => lead.opportunityScore >= 70).map((lead) => lead.propertyId ?? lead.id),
-      whalePropertyIds: clusterLeads.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").map((lead) => lead.propertyId ?? lead.id),
-      megaWhalePropertyIds: clusterLeads.filter((lead) => lead.capacityBand === "MEGA_WHALE").map((lead) => lead.propertyId ?? lead.id),
+      whalePropertyIds: clusterLeads.filter((lead) => lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE").map((lead) => lead.propertyId ?? lead.id),
+      megaWhalePropertyIds: clusterLeads.filter((lead) => lead.whaleQualification === "MEGA_WHALE").map((lead) => lead.propertyId ?? lead.id),
       averageOpportunityScore,
       averageCapacityKw,
       densityScore,
@@ -176,7 +176,7 @@ function routeForMode(
     distanceMiles: distance,
     estimatedMinutes,
     highPriorityCount: stops.filter((stop) => stop.lead.opportunityScore >= 70).length,
-    whaleCount: stops.filter((stop) => stop.lead.whaleScore >= 60).length,
+    whaleCount: stops.filter((stop) => stop.lead.whaleQualification === "WHALE" || stop.lead.whaleQualification === "MEGA_WHALE").length,
     expectedOpportunityPerRepHour: calculateExpectedOpportunityPerRepHour({
       averageOpportunityScore,
       fieldEfficiencyScore,

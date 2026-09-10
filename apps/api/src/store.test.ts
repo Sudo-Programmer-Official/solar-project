@@ -142,6 +142,69 @@ test("analyzeProperty persists roof segments and computes a solar fit score from
   assert.equal(secondResult.solarAssessment.id, firstResult.solarAssessment.id);
   assert.equal(geocodeFetchCount, 1);
   assert.equal(solarFetchCount, 1);
+  assert.equal(secondResult.dataQuality.imageryFreshness, "AGING");
+});
+
+test("analyzeProperty does not invent permit credit when no permit evidence exists", async () => {
+  const repository = new InMemorySolarRepository();
+  const result = await analyzeProperty(
+    {
+      address: "308 Baughman St, West Newton, PA",
+      municipality: "West Newton",
+      county: "Westmoreland",
+      state: "PA",
+      postalCode: "15089",
+    },
+    repository,
+    {
+      geocoder: createGeocoder(40.211, -79.768),
+      solarProvider: createSolarProvider(),
+    },
+  );
+
+  assert.equal(result.permits.length, 0);
+  assert.equal(result.opportunityAssessment.permitSignalScore, 0);
+  assert.equal(result.reasons.some((reason) => reason.toLowerCase().includes("permit")), false);
+  assert.equal(result.dataQuality.dataConfidenceScore >= 0, true);
+});
+
+test("legacy manual_seed permits remain excluded from confidence and scoring", async () => {
+  const repository = new InMemorySolarRepository();
+  const input = {
+    address: "308 Baughman St, West Newton, PA",
+    municipality: "West Newton",
+    county: "Westmoreland",
+    state: "PA",
+    postalCode: "15089",
+  };
+  const dependencies = {
+    geocoder: createGeocoder(40.211, -79.768),
+    solarProvider: createSolarProvider(),
+  };
+
+  const first = await analyzeProperty(input, repository, dependencies);
+  await repository.replacePermitRecords(first.property.id, [{
+    id: "00000000-0000-4000-8000-000000000911",
+    propertyId: first.property.id,
+    municipality: "West Newton",
+    county: "Westmoreland",
+    state: "PA",
+    permitNumber: null,
+    permitType: "ROOF",
+    status: "ISSUED",
+    applicationDate: "2026-01-01",
+    issuedDate: "2026-01-02",
+    contractorName: null,
+    sourceProvider: "manual_seed",
+    sourceUrl: null,
+    confidence: 1,
+    retrievedAt: new Date().toISOString(),
+  }]);
+
+  const refreshed = await analyzeProperty(input, repository, dependencies);
+  assert.equal(refreshed.opportunityAssessment.permitSignalScore, 0);
+  assert.equal(refreshed.dataQuality.missingSignals.includes("permit_history"), true);
+  assert.equal(refreshed.dataQuality.warnings.some((warning) => warning.includes("excluded from scoring")), true);
 });
 
 test("analyzeProperty reduces confidence when roof and imagery inputs are missing", async () => {

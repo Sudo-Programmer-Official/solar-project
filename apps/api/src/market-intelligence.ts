@@ -28,6 +28,8 @@ export interface MarketCandidateClassificationInput {
   strongScore: number | null | undefined;
   capacityKw?: number | null;
   minimumWhaleSolarScore?: number;
+  dataConfidenceScore?: number | null;
+  minimumWhaleDataConfidence?: number;
   processingError?: boolean;
   duplicate?: boolean;
 }
@@ -37,6 +39,7 @@ export const DEFAULT_DISCOVERY_CAPACITY_THRESHOLDS = {
   whaleKw: 20,
   megaWhaleKw: 30,
   whaleSolarScore: 60,
+  whaleDataConfidence: 70,
 } as const;
 
 export function getDiscoveryCapacityThresholds() {
@@ -45,6 +48,7 @@ export function getDiscoveryCapacityThresholds() {
     whaleKw: readPositiveNumber("DISCOVERY_WHALE_KW", DEFAULT_DISCOVERY_CAPACITY_THRESHOLDS.whaleKw),
     megaWhaleKw: readPositiveNumber("DISCOVERY_MEGA_WHALE_KW", DEFAULT_DISCOVERY_CAPACITY_THRESHOLDS.megaWhaleKw),
     whaleSolarScore: readPositiveNumber("DISCOVERY_WHALE_SOLAR_SCORE", DEFAULT_DISCOVERY_CAPACITY_THRESHOLDS.whaleSolarScore),
+    whaleDataConfidence: readPositiveNumber("DISCOVERY_WHALE_DATA_CONFIDENCE", DEFAULT_DISCOVERY_CAPACITY_THRESHOLDS.whaleDataConfidence),
   };
 }
 
@@ -128,7 +132,8 @@ export function classifyMarketCandidate(input: MarketCandidateClassificationInpu
   const thresholds = getDiscoveryCapacityThresholds();
   if (
     (input.capacityKw ?? 0) >= thresholds.whaleKw &&
-    (input.solarScore ?? 0) >= (input.minimumWhaleSolarScore ?? thresholds.whaleSolarScore)
+    (input.solarScore ?? 0) >= (input.minimumWhaleSolarScore ?? thresholds.whaleSolarScore) &&
+    (input.dataConfidenceScore ?? 0) >= (input.minimumWhaleDataConfidence ?? thresholds.whaleDataConfidence)
   ) return "WHALE";
   if ((input.strongScore ?? 0) >= 70) return "STRONG";
   return "VIABLE";

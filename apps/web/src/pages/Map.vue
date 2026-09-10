@@ -141,7 +141,7 @@ const selectedCluster = computed(() => clusters.value.find((cluster) => cluster.
 const selectedLead = computed(() => leads.value.find((lead) => (lead.propertyId ?? lead.id) === selectedId.value) ?? null);
 const sortedClusters = computed(() => [...clusters.value].sort((left, right) => right.fieldPriorityScore - left.fieldPriorityScore));
 const strongLeadCount = computed(() => leads.value.filter((lead) => lead.opportunityScore >= 70).length);
-const whaleCount = computed(() => leads.value.filter((lead) => lead.whaleScore >= 60).length);
+const whaleCount = computed(() => leads.value.filter((lead) => lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE").length);
 const hoodScore = computed(() => Math.round(average(clusters.value.map((cluster) => cluster.fieldPriorityScore)) || average(leads.value.map((lead) => lead.opportunityScore))));
 const goodClusterCount = computed(() => clusters.value.filter((cluster) => cluster.fieldPriorityScore >= 65 && cluster.fieldEfficiencyScore >= 55).length);
 const lowEfficiencyZoneCount = computed(() => clusters.value.filter((cluster) => (cluster.lowEfficiencyZones ?? []).length > 0).length);

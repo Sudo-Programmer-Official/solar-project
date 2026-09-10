@@ -31,6 +31,19 @@
       </div>
     </div>
 
+    <div v-if="scanMetrics" class="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50/50 px-3 py-2 text-xs leading-5 text-slate-600">
+      <span class="font-semibold text-slate-800">Evidence:</span>
+      {{ scanMetrics.imageryFreshCount }} fresh · {{ scanMetrics.imageryAgingCount }} aging · {{ scanMetrics.imageryStaleCount }} stale · {{ scanMetrics.imageryUnknownCount }} unknown
+      <span class="mx-1 text-slate-300">·</span>
+      <span class="font-semibold text-slate-800">Analysis:</span>
+      {{ scanMetrics.freshlyAnalyzedCount }} fresh · {{ scanMetrics.cachedAnalyzedCount }} cached · {{ scanMetrics.preliminaryOnlyCount }} preliminary
+      <span class="mx-1 text-slate-300">·</span>
+      <span class="font-semibold text-slate-800">Whales:</span>
+      {{ scanMetrics.confirmedWhaleCount }} confirmed · {{ scanMetrics.potentialWhaleCount }} potential
+      <span class="mx-1 text-slate-300">·</span>
+      {{ scanMetrics.permitCreditCount }} verified permit signals
+    </div>
+
     <div class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
       <span>{{ metrics.densePocketCount }} dense pockets</span>
       <span>{{ metrics.clusteredPropertyCount }} clustered · {{ metrics.isolatedPropertyCount }} isolated</span>
@@ -71,11 +84,12 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import type { DiscoveryDiagnostics, DiscoveryMarketMetrics } from "@solar/contracts";
+import type { DiscoveryDiagnostics, DiscoveryMarketMetrics, DiscoveryScanMetrics } from "@solar/contracts";
 
 const props = defineProps<{
   metrics: DiscoveryMarketMetrics | null | undefined;
   diagnostics?: DiscoveryDiagnostics | null;
+  scanMetrics?: DiscoveryScanMetrics | null;
 }>();
 
 const metrics = computed(() => props.metrics ?? null);

@@ -81,7 +81,7 @@
       </div>
     </section>
 
-    <MarketIntelligencePanel class="mt-4" :metrics="hunt.scanProgress?.marketMetrics" :diagnostics="hunt.scanProgress?.discoveryDiagnostics" />
+    <MarketIntelligencePanel class="mt-4" :metrics="hunt.scanProgress?.marketMetrics" :diagnostics="hunt.scanProgress?.discoveryDiagnostics" :scan-metrics="hunt.scanProgress?.metrics" />
 
     <LeadResultsTable
       v-if="hunt.scan || hunt.isScanning"

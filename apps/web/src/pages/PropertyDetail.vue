@@ -33,7 +33,7 @@
             <div class="space-y-3">
               <div class="flex flex-wrap items-center gap-2">
                 <OpportunityScore :score="detail.opportunityAssessment.overallOpportunityScore" />
-                <WhaleBadge :isWhale="detail.whaleScore.whaleScore >= 60" />
+                <WhaleBadge :is-whale="isConfirmedWhale" :label="whaleLabel" />
               </div>
               <div>
                 <h1 class="text-xl font-semibold text-slate-900">{{ displayAddress }}</h1>
@@ -55,6 +55,14 @@
             <LocationMatchBadge :verification="detail.locationVerification ?? null" />
           </div>
 
+          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+            <span class="rounded-full bg-slate-100 px-2.5 py-1">Data {{ detail.dataQuality.dataConfidenceScore }}%</span>
+            <span class="rounded-full bg-slate-100 px-2.5 py-1">Imagery {{ detail.dataQuality.imageryFreshness }}</span>
+            <span v-if="detail.solarAssessment.imageryDate" class="rounded-full bg-slate-100 px-2.5 py-1">Captured {{ formatDate(detail.solarAssessment.imageryDate) }}</span>
+            <span v-if="detail.solarAssessment.imageryProcessedDate" class="rounded-full bg-slate-100 px-2.5 py-1">Processed {{ formatDate(detail.solarAssessment.imageryProcessedDate) }}</span>
+            <span v-if="detail.solarAssessment.imageryQuality" class="rounded-full bg-slate-100 px-2.5 py-1">Quality {{ detail.solarAssessment.imageryQuality }}</span>
+          </div>
+
           <div class="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
             <div class="rounded-2xl bg-slate-50 p-3">
               <span class="text-slate-500">Max capacity</span>
@@ -65,7 +73,7 @@
               <strong class="mt-1 block text-slate-900">{{ formatNumber(detail.solarAssessment.estimatedAnnualProductionKwh) }} kWh</strong>
             </div>
             <div class="rounded-2xl bg-slate-50 p-3">
-              <span class="text-slate-500">Confidence</span>
+              <span class="text-slate-500">Model confidence</span>
               <strong class="mt-1 block text-slate-900">{{ detail.opportunityAssessment.confidence }}%</strong>
             </div>
             <div class="rounded-2xl bg-slate-50 p-3">
@@ -100,8 +108,8 @@
               <strong class="mt-1 block text-slate-900">{{ detail.solarAssessment.existingSolarStatus }}</strong>
             </div>
             <div class="rounded-2xl bg-slate-50 p-3">
-              <span class="text-slate-500">Data quality</span>
-              <strong class="mt-1 block text-slate-900">{{ detail.dataQuality.grade }} / {{ detail.dataQuality.confidence }}%</strong>
+              <span class="text-slate-500">Data confidence</span>
+              <strong class="mt-1 block text-slate-900">{{ detail.dataQuality.grade }} / {{ detail.dataQuality.dataConfidenceScore }}%</strong>
             </div>
           </div>
         </div>
@@ -339,6 +347,8 @@ const outcomeButtons = [
 ] as const satisfies ReadonlyArray<{ label: string; outcome: LeadOutcome["outcome"] }>;
 
 const detail = computed(() => leadDetail.value);
+const whaleLabel = computed(() => formatWhaleLabel(detail.value?.whaleQualification));
+const isConfirmedWhale = computed(() => detail.value?.whaleQualification === "WHALE" || detail.value?.whaleQualification === "MEGA_WHALE");
 const currentPropertyId = computed(() => props.propertyId ?? (typeof route.params.id === "string" ? route.params.id : null));
 const displayAddress = computed(() => formatLeadAddress(detail.value?.property.street ?? null, detail.value?.property.normalizedAddress ?? null, detail.value?.property.city ?? null, detail.value?.property.state ?? null, detail.value?.property.municipality ?? null));
 const locationLabel = computed(() => formatLocationLabel(detail.value?.property.city ?? null, detail.value?.property.state ?? null, detail.value?.property.municipality ?? null));
@@ -567,6 +577,22 @@ function formatOutcome(outcome: LeadOutcome["outcome"]) {
 function formatNumber(value?: number | null) {
   if (value == null) return "--";
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "Unknown";
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
+}
+
+function formatWhaleLabel(qualification?: NonNullable<NonNullable<typeof detail.value>["whaleQualification"]>) {
+  switch (qualification) {
+    case "MEGA_WHALE": return "Mega whale";
+    case "WHALE": return "Whale";
+    case "POTENTIAL_MEGA_WHALE": return "Potential mega whale";
+    case "POTENTIAL_WHALE": return "Potential whale";
+    default: return undefined;
+  }
 }
 
 function formatOpportunitySignal(signal: { label: string; value: string | number | boolean | null; unit?: string | null }) {

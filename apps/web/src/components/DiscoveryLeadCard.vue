@@ -16,7 +16,7 @@
         <div class="space-y-2">
           <div class="flex flex-wrap items-center gap-2">
             <OpportunityScore :score="lead.opportunityScore" />
-            <WhaleBadge :isWhale="lead.whaleScore >= 60" />
+            <WhaleBadge :is-whale="isConfirmedWhale" :label="whaleLabel" />
             <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-slate-600">
               {{ lead.analysisStatus }}
             </span>
@@ -123,6 +123,8 @@ const displaySignals = computed(() => {
 
 const displayTitle = computed(() => formatLeadTitle(props.lead.address, props.lead.city, props.lead.state, props.lead.postalCode));
 const locationLabel = computed(() => formatLocationLabel(props.lead.city, props.lead.state, props.lead.postalCode));
+const whaleLabel = computed(() => formatWhaleLabel(props.lead.whaleQualification));
+const isConfirmedWhale = computed(() => props.lead.whaleQualification === "WHALE" || props.lead.whaleQualification === "MEGA_WHALE");
 
 function formatNumber(value?: number | null) {
   if (value == null) return "--";
@@ -135,6 +137,16 @@ function formatDistance(value?: number | null) {
 }
 
 const visualSubtitle = "Satellite view";
+
+function formatWhaleLabel(qualification?: DiscoveryScanLead["whaleQualification"]) {
+  switch (qualification) {
+    case "MEGA_WHALE": return "Mega whale";
+    case "WHALE": return "Whale";
+    case "POTENTIAL_MEGA_WHALE": return "Potential mega whale";
+    case "POTENTIAL_WHALE": return "Potential whale";
+    default: return undefined;
+  }
+}
 
 function formatOpportunitySignal(signal: OpportunitySignal) {
   const value = signal.value == null ? "" : ` ${formatSignalValue(signal.value)}${signal.unit ? ` ${signal.unit}` : ""}`;

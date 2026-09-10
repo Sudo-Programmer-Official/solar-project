@@ -25,7 +25,7 @@
           <div class="space-y-2">
             <div class="flex flex-wrap items-center gap-2">
               <OpportunityScore :score="lead.opportunityScore" />
-              <WhaleBadge v-if="lead.whaleScore >= 60" :isWhale="true" />
+              <WhaleBadge v-if="whaleLabel" :is-whale="isConfirmedWhale" :label="whaleLabel" />
             </div>
 
             <div>
@@ -127,6 +127,8 @@ const streetLabel = computed(() => sanitizeText(props.lead.address) || "Address 
 const locationLabel = computed(() => formatLocationLabel(props.lead.city, props.lead.state, props.lead.postalCode));
 const fullAddress = computed(() => [streetLabel.value, locationLabel.value].filter((item) => item && item !== "Location unavailable").join(", "));
 const distanceLabel = computed(() => (props.lead.distanceMiles == null ? "Distance unknown" : `${props.lead.distanceMiles.toFixed(1)} mi`));
+const whaleLabel = computed(() => formatWhaleLabel(props.lead.whaleQualification));
+const isConfirmedWhale = computed(() => props.lead.whaleQualification === "WHALE" || props.lead.whaleQualification === "MEGA_WHALE");
 const highValueSignalLabel = computed(() => {
   const signal = selectHighValueSignal(props.lead.visualSignals ?? []);
   if (!signal) return null;
@@ -151,6 +153,16 @@ const highValueSignalLabel = computed(() => {
       return null;
   }
 });
+
+function formatWhaleLabel(qualification?: TodayLeadCard["whaleQualification"]) {
+  switch (qualification) {
+    case "MEGA_WHALE": return "Mega whale";
+    case "WHALE": return "Whale";
+    case "POTENTIAL_MEGA_WHALE": return "Potential mega whale";
+    case "POTENTIAL_WHALE": return "Potential whale";
+    default: return undefined;
+  }
+}
 
 function formatNumber(value?: number | null) {
   if (value == null) return "--";

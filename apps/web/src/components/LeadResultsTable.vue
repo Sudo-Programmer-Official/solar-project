@@ -53,7 +53,7 @@
               <th class="w-[15%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('city')">City <span v-if="sortKey === 'city'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
               <th class="w-[10%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('opportunityScore')">Priority <span v-if="sortKey === 'opportunityScore'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
               <th class="w-[13%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('capacity')">Capacity <span v-if="sortKey === 'capacity'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
-              <th class="w-[11%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('confidence')">Confidence <span v-if="sortKey === 'confidence'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
+              <th class="w-[11%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('confidence')">Model <span v-if="sortKey === 'confidence'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
               <th class="w-[10%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('distance')">Distance <span v-if="sortKey === 'distance'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
               <th class="w-[11%] px-3 py-3"><button class="inline-flex items-center gap-1 font-semibold transition hover:text-slate-900" type="button" @click="sortBy('status')">Status <span v-if="sortKey === 'status'" aria-hidden="true">{{ sortDirection === 'asc' ? '↑' : '↓' }}</span></button></th>
               <th class="w-[12%] px-3 py-3">Action</th>
@@ -78,7 +78,7 @@
                   <span class="block text-slate-500">Whale {{ lead.whaleScore }}</span>
                 </div>
               </td>
-              <td class="px-3 py-3 text-slate-700"><span class="block">{{ formatNumber(lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw) }} kW</span><span v-if="lead.capacityBand && lead.capacityBand !== 'UNKNOWN'" class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{{ lead.capacityBand.replace('_', ' ') }}</span></td>
+              <td class="px-3 py-3 text-slate-700"><span class="block">{{ formatNumber(lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw) }} kW</span><span v-if="lead.whaleQualification && lead.whaleQualification !== 'NONE'" class="block text-[10px] font-semibold uppercase tracking-wide text-amber-700">{{ whaleQualificationLabel(lead.whaleQualification) }}</span><span v-else-if="lead.capacityBand && lead.capacityBand !== 'UNKNOWN'" class="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{{ lead.capacityBand.replace('_', ' ') }}</span><span v-if="lead.dataConfidenceScore != null" class="mt-1 block text-[10px] text-slate-500">Data {{ lead.dataConfidenceScore }}% · {{ lead.imageryFreshness ?? 'UNKNOWN' }}</span></td>
               <td class="px-3 py-3 text-slate-700">{{ lead.confidence }}%</td>
               <td class="px-3 py-3 text-slate-600">{{ distanceLabel(lead.searchCenterDistanceMiles ?? lead.distanceMiles) }}</td>
               <td class="px-3 py-3"><span class="inline-flex max-w-full truncate rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide" :class="statusClasses(lead.outcome)">{{ formatStatus(lead.outcome) }}</span><span v-if="lead.rejectionReason" class="mt-1 block truncate text-[10px] text-rose-600" :title="lead.rejectionReason">{{ lead.rejectionReason.replaceAll('_', ' ') }}</span></td>
@@ -137,8 +137,8 @@
           <span class="shrink-0 rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-bold text-cyan-700">{{ lead.opportunityScore }}</span>
         </div>
         <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
-          <div class="rounded-xl bg-slate-50 p-2.5"><span class="block text-slate-500">Capacity</span><strong class="mt-1 block text-slate-900">{{ formatNumber(lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw) }} kW</strong><span v-if="lead.capacityBand && lead.capacityBand !== 'UNKNOWN'" class="mt-0.5 block text-[10px] font-semibold uppercase text-slate-400">{{ lead.capacityBand.replace('_', ' ') }}</span></div>
-          <div class="rounded-xl bg-slate-50 p-2.5"><span class="block text-slate-500">Confidence</span><strong class="mt-1 block text-slate-900">{{ lead.confidence }}%</strong></div>
+          <div class="rounded-xl bg-slate-50 p-2.5"><span class="block text-slate-500">Capacity</span><strong class="mt-1 block text-slate-900">{{ formatNumber(lead.maxRoofSolarCapacityKw ?? lead.maxSystemKw) }} kW</strong><span v-if="lead.whaleQualification && lead.whaleQualification !== 'NONE'" class="mt-0.5 block text-[10px] font-semibold uppercase text-amber-700">{{ whaleQualificationLabel(lead.whaleQualification) }}</span><span v-else-if="lead.capacityBand && lead.capacityBand !== 'UNKNOWN'" class="mt-0.5 block text-[10px] font-semibold uppercase text-slate-400">{{ lead.capacityBand.replace('_', ' ') }}</span><span v-if="lead.dataConfidenceScore != null" class="mt-1 block text-[10px] text-slate-500">Data {{ lead.dataConfidenceScore }}% · {{ lead.imageryFreshness ?? 'UNKNOWN' }}</span></div>
+          <div class="rounded-xl bg-slate-50 p-2.5"><span class="block text-slate-500">Model confidence</span><strong class="mt-1 block text-slate-900">{{ lead.confidence }}%</strong></div>
           <div class="rounded-xl bg-slate-50 p-2.5"><span class="block text-slate-500">Status</span><strong class="mt-1 block truncate text-slate-900">{{ formatStatus(lead.outcome) }}</strong><span v-if="lead.rejectionReason" class="mt-0.5 block truncate text-[10px] text-rose-600">{{ lead.rejectionReason.replaceAll('_', ' ') }}</span></div>
         </div>
         <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
@@ -337,6 +337,10 @@ function statusClasses(status?: string | null) {
 
 function formatNumber(value: number | null | undefined) {
   return value == null ? "--" : new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
+}
+
+function whaleQualificationLabel(value: DiscoveryScanLead["whaleQualification"]) {
+  return value?.replaceAll("_", " ") ?? "";
 }
 
 function distanceLabel(distance: number | null | undefined) {

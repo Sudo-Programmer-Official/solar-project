@@ -87,7 +87,7 @@
       </p>
     </section>
 
-    <MarketIntelligencePanel class="mt-4" :metrics="scanProgress?.marketMetrics" :diagnostics="scanProgress?.discoveryDiagnostics" />
+    <MarketIntelligencePanel class="mt-4" :metrics="scanProgress?.marketMetrics" :diagnostics="scanProgress?.discoveryDiagnostics" :scan-metrics="scanProgress?.metrics" />
 
     <section v-if="clusters.length > 0" class="mt-4 grid gap-3">
       <div class="px-1">
@@ -373,7 +373,7 @@ const currentLatitude = computed(() => currentLocation.latitude.value ?? resolve
 const currentLongitude = computed(() => currentLocation.longitude.value ?? resolvedLocation.value?.longitude ?? hunt.lastLongitude ?? null);
 const canScan = computed(() => resolvedLocation.value != null);
 const summary = computed(() => ({
-  whales: results.value.filter((lead) => lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE").length,
+  whales: results.value.filter((lead) => lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE").length,
   large: results.value.filter((lead) => lead.verificationStatus === "VERIFIED" && ["LARGE", "WHALE", "MEGA_WHALE"].includes(lead.capacityBand ?? "UNKNOWN")).length,
   permits: results.value.filter((lead) => lead.reasons.some((reason) => reason.toLowerCase().includes("permit"))).length,
   revisits: results.value.filter((lead) => lead.outcome === "REVISIT" || lead.outcome === "NOT_HOME" || lead.outcome === "BILL_REQUESTED").length,
@@ -523,12 +523,12 @@ const clusters = computed(() => {
     current.count += 1;
     current.leads.push(lead);
     current.strongLeadCount += lead.opportunityScore >= 70 ? 1 : 0;
-    current.whaleCount += lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE" ? 1 : 0;
-    current.megaWhaleCount += lead.capacityBand === "MEGA_WHALE" ? 1 : 0;
+    current.whaleCount += lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE" ? 1 : 0;
+    current.megaWhaleCount += lead.whaleQualification === "MEGA_WHALE" ? 1 : 0;
     current.propertyIds.push(lead.propertyId ?? lead.id);
     if (lead.opportunityScore >= 70) current.strongPropertyIds.push(lead.propertyId ?? lead.id);
-    if (lead.capacityBand === "WHALE" || lead.capacityBand === "MEGA_WHALE") current.whalePropertyIds.push(lead.propertyId ?? lead.id);
-    if (lead.capacityBand === "MEGA_WHALE") current.megaWhalePropertyIds.push(lead.propertyId ?? lead.id);
+    if (lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE") current.whalePropertyIds.push(lead.propertyId ?? lead.id);
+    if (lead.whaleQualification === "MEGA_WHALE") current.megaWhalePropertyIds.push(lead.propertyId ?? lead.id);
     current.fieldPriorityScore = Math.max(current.fieldPriorityScore, lead.fieldPriorityScore ?? 0);
     groups.set(key, current);
   }
@@ -1029,7 +1029,7 @@ function toneFromLead(lead: DiscoveryScanLead) {
   if (lead.outcome === "APPOINTMENT_BOOKED") return "purple";
   if (lead.outcome === "NOT_HOME") return "blue";
   if (lead.outcome === "BILL_REQUESTED" || lead.outcome === "BILL_RECEIVED") return "green";
-  if (lead.whaleScore >= 60) return "gold";
+  if (lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE") return "gold";
   if ((lead.maxRoofSolarCapacityKw ?? 0) >= 15) return "green";
   return "gray";
 }
