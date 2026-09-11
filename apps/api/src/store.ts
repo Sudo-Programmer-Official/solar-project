@@ -1716,10 +1716,6 @@ async function runDiscoveryScanJob(
         updatedAt: new Date().toISOString(),
       },
     );
-    await persistDiscoveryScanCheckpoint(repository, discoveryScanStore.get(scanId) ?? baseJob);
-    await persistDiscoveryScanCells(repository, scanId, coverageCells, deduplicatedCandidates, coverageSourceSucceeded);
-    await persistPropertyVerifications(repository, scanId, deduplicatedCandidates);
-
     let analyzedCount = 0;
     let googleSolarCalls = 0;
     const results: DiscoveryScanLead[] = [];
@@ -1763,8 +1759,16 @@ async function runDiscoveryScanJob(
           updatedAt: new Date().toISOString(),
         },
       );
-      await persistDiscoveryScanCheckpoint(repository, discoveryScanStore.get(scanId) ?? baseJob);
+      // Publish the first batch before writing the per-property audit trail.
+      // The audit trail can contain hundreds or thousands of rows and must not
+      // delay the leads that the field user is waiting to review.
+      void persistDiscoveryScanCheckpoint(repository, discoveryScanStore.get(scanId) ?? baseJob);
     }
+
+    // Coverage cells are written once at the end of the scan. Verification
+    // records are useful audit data, but they are intentionally off the
+    // critical path so a large market cannot hold the first results hostage.
+    void persistPropertyVerifications(repository, scanId, deduplicatedCandidates);
 
     const solarEnrichmentStartedAt = Date.now();
     for (let index = 0; index < rankedCandidates.length; index += 1) {

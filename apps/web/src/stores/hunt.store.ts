@@ -301,7 +301,14 @@ export const useHuntStore = defineStore("hunt", () => {
           scanProgress.value = nextProgress;
           scan.value = nextProgress;
         }
-        const availableLeadCount = scanProgress.value?.metrics.qualifiedLeadCount ?? scanProgress.value?.metrics.resultsFound ?? 0;
+        // `qualifiedLeadCount` can remain zero while the first batch contains
+        // preliminary leads. Use the rendered/result count as well so the
+        // field view starts showing work as soon as the API publishes it.
+        const availableLeadCount = Math.max(
+          scanProgress.value?.metrics.qualifiedLeadCount ?? 0,
+          scanProgress.value?.metrics.resultsFound ?? 0,
+          scanProgress.value?.metrics.renderedLeadCount ?? 0,
+        );
         if (availableLeadCount > scanResults.value.length && !scanResultsLoading.value) {
           await loadScanResultsPage({ reset: scanResults.value.length === 0, scanId: job.scanId, sessionId });
         }
@@ -328,6 +335,14 @@ export const useHuntStore = defineStore("hunt", () => {
       }
       if (scanResults.value.length === 0 && currentScanId.value) {
         await loadScanResultsPage({ reset: true, scanId: job.scanId, sessionId });
+      }
+      // A client-side polling timeout is a degraded/partial state, not a
+      // failed scan, when the API has already published usable leads.
+      if (
+        scanResults.value.length > 0 &&
+        scanProgress.value?.warnings?.includes("CLIENT_POLL_TIMEOUT")
+      ) {
+        error.value = null;
       }
       selectedPropertyIds.value = savedRouteItems.value.map((item) => item.propertyId);
       return scan.value ?? emptyScanResult(committedRadius, center);

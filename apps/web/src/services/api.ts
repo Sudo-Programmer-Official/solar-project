@@ -356,9 +356,9 @@ export interface PropertyDetailPayload {
   verificationNeeded: boolean;
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function requestJson<T>(path: string, init?: RequestInit, timeoutMs = 8000): Promise<T | null> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8000);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response = await fetch(resolveUrl(path), {
       ...init,
@@ -836,7 +836,7 @@ export async function scanDiscovery(body: DiscoveryScanRequest): Promise<Discove
 }
 
 export async function getDiscoveryScan(scanId: string): Promise<DiscoveryScanStatusResponse | null> {
-  return requestJson<DiscoveryScanStatusResponse>(`/api/v1/discovery/scans/${encodeURIComponent(scanId)}`);
+  return requestJson<DiscoveryScanStatusResponse>(`/api/v1/discovery/scans/${encodeURIComponent(scanId)}`, undefined, 15000);
 }
 
 export async function getDiscoveryScanResults(scanId: string, cursor?: string | null, limit = 20): Promise<DiscoveryScanResultsPage | null> {
@@ -846,7 +846,7 @@ export async function getDiscoveryScanResults(scanId: string, cursor?: string | 
   }
   params.set("limit", String(limit));
   const suffix = params.toString();
-  return requestJson<DiscoveryScanResultsPage>(`/api/v1/discovery/scans/${encodeURIComponent(scanId)}/results${suffix ? `?${suffix}` : ""}`);
+  return requestJson<DiscoveryScanResultsPage>(`/api/v1/discovery/scans/${encodeURIComponent(scanId)}/results${suffix ? `?${suffix}` : ""}`, undefined, 15000);
 }
 
 async function waitForDiscoveryScan(scanId: string): Promise<DiscoveryScanResult | null> {
