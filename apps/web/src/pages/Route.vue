@@ -81,6 +81,25 @@
     />
 
     <template v-else>
+      <section class="page-surface mt-4 p-3 sm:p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="field-label">LIVE ROUTE MAP</p>
+            <p class="mt-1 text-sm text-slate-500">Every saved property is plotted in order from {{ distanceOrigin?.source === "SEARCH_CENTER" ? "the search center" : "your location" }}.</p>
+          </div>
+          <span class="rounded-full bg-cyan-50 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-cyan-800">{{ routeMapPoints.length }} mapped</span>
+        </div>
+        <RealLeadMap
+          class="mt-3"
+          :points="routeMapPoints"
+          :origin="routeMapOrigin"
+          :origin-label="routeMapOriginLabel"
+          :route-order="routeMapOrder"
+          title="Saved field route"
+          @point-click="openPropertyById"
+        />
+      </section>
+
       <section class="page-surface mt-4 overflow-hidden p-0">
         <div class="hidden overflow-x-auto md:block">
           <table class="w-full min-w-[760px] text-left text-sm">
@@ -181,6 +200,7 @@ import EmptyState from "../components/EmptyState.vue";
 import MobileHeader from "../components/MobileHeader.vue";
 import PageSkeleton from "../components/PageSkeleton.vue";
 import PropertyDetailDrawer from "../components/PropertyDetailDrawer.vue";
+import RealLeadMap, { type RealLeadMapPoint } from "../components/RealLeadMap.vue";
 
 const router = useRouter();
 const hunt = useHuntStore();
@@ -228,6 +248,29 @@ const originSummary = computed(() => {
     default: return "Distance unavailable until a location is available";
   }
 });
+const routeMapOrigin = computed<DistanceCoordinate | null>(() => distanceOrigin.value
+  ? { latitude: distanceOrigin.value.latitude, longitude: distanceOrigin.value.longitude }
+  : null);
+const routeMapOriginLabel = computed(() => {
+  switch (distanceOrigin.value?.source) {
+    case "LIVE_DEVICE": return "your live location";
+    case "RECENT_DEVICE": return "your recent location";
+    case "SEARCH_CENTER": return "the search center";
+    default: return "the route origin";
+  }
+});
+const routeMapPoints = computed<RealLeadMapPoint[]>(() => items.value
+  .filter((item) => item.latitude != null && item.longitude != null)
+  .map((item) => ({
+    id: item.propertyId,
+    latitude: item.latitude,
+    longitude: item.longitude,
+    label: item.address,
+    tone: item.opportunityScore >= 70 ? "green" : "blue",
+  })));
+const routeMapOrder = computed(() => (routePlan.value?.stops.length
+  ? routePlan.value.stops.map((stop) => stop.propertyId)
+  : items.value.map((item) => item.propertyId)));
 
 type RouteDistanceOriginSource = Exclude<CurrentLocationSource, null> | "SEARCH_CENTER";
 type RouteDistanceOrigin = DistanceCoordinate & { source: RouteDistanceOriginSource };
@@ -294,6 +337,10 @@ async function removeItem(item: SavedRouteItem) {
 
 function openProperty(item: SavedRouteItem) {
   selectedPropertyId.value = item.propertyId;
+}
+
+function openPropertyById(propertyId: string) {
+  selectedPropertyId.value = propertyId;
 }
 
 function selectRelative(offset: -1 | 1) {

@@ -87,6 +87,7 @@
       v-if="hunt.scan || hunt.isScanning"
       class="mt-4"
       :leads="results"
+      :origin="scanOrigin"
       :total="scanResultsTotal || strongLeadCount"
       :has-more="scanResultsHasMore"
       :loading-more="scanResultsLoading"
@@ -145,6 +146,11 @@ const searchStore = useSearchContextStore();
 const startingScan = ref(false);
 
 const results = computed(() => hunt.scanResults);
+const scanOrigin = computed(() => {
+  const latitude = hunt.lastLatitude ?? searchStore.context?.latitude ?? null;
+  const longitude = hunt.lastLongitude ?? searchStore.context?.longitude ?? null;
+  return latitude != null && longitude != null ? { latitude, longitude } : null;
+});
 const locationLabel = computed(() => searchStore.contextLabel || hunt.scan?.currentLocation || "selected location");
 const radiusLabel = computed(() => `${searchStore.radiusMiles} mi radius`);
 const filterLabel = computed(() => searchStore.filterCount > 0 ? `${searchStore.filterCount} filters active` : "all filters");

@@ -55,14 +55,19 @@
 
     <template v-else>
     <section class="mt-4 page-surface p-4">
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex items-start justify-between gap-3">
         <div>
           <p class="field-label">Ranked results</p>
           <p class="mt-1 text-sm text-slate-500">{{ summaryLabel }}</p>
         </div>
-        <button class="touch-target rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm" :disabled="hunt.isScanning" @click="runScan">
-          {{ hunt.isScanning ? "Scanning..." : "Rescan" }}
-        </button>
+        <div class="flex shrink-0 flex-wrap justify-end gap-2">
+          <button class="touch-target rounded-full border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800 shadow-sm" type="button" @click="currentView = currentView === 'map' ? 'list' : 'map'">
+            {{ currentView === 'map' ? "List view" : "Map view" }}
+          </button>
+          <button class="touch-target rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm" :disabled="hunt.isScanning" @click="runScan">
+            {{ hunt.isScanning ? "Scanning..." : "Rescan" }}
+          </button>
+        </div>
       </div>
       <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div class="rounded-2xl bg-slate-50 p-3">
@@ -168,15 +173,12 @@
             Recenter
           </button>
         </div>
-        <PropertyVisual
+        <RealLeadMap
           class="mt-4"
-          mode="map"
-          :center-latitude="currentLatitude ?? mapCenterLatitude"
-          :center-longitude="currentLongitude ?? mapCenterLongitude"
-          :points="mapPoints"
-          :title="selectedLeadTitle || 'Ranked leads'"
-          :subtitle="selectedLead ? selectedLeadSummary : 'Tap a pin to inspect a lead.'"
-          provider-label="Ranked pins"
+          :points="realMapPoints"
+          :origin="leadMapOrigin"
+          :origin-label="leadMapOriginLabel"
+          title="Loaded lead route"
           @point-click="selectPin"
         />
         <div class="mt-4 flex items-center justify-between gap-3">
@@ -306,7 +308,7 @@ import { useLeadActions } from "../composables/useLeadActions";
 import { useHuntStore } from "../stores/hunt.store";
 import { useSearchContextStore } from "../stores/search-context.store";
 import { resolveLocation } from "../services/api";
-import PropertyVisual, { type PropertyVisualPoint } from "./PropertyVisual.vue";
+import RealLeadMap, { type RealLeadMapPoint } from "./RealLeadMap.vue";
 import EmptyState from "./EmptyState.vue";
 import MobileHeader from "./MobileHeader.vue";
 import LeadResultsTable from "./LeadResultsTable.vue";
@@ -340,7 +342,6 @@ const resolvedLocation = ref<LocationResolveResponse | null>(null);
 const resolvingLocation = ref(false);
 const locationError = ref<string | null>(null);
 const recentSearches = ref<string[]>([]);
-const fallback = { latitude: 40.2108, longitude: -79.7665 };
 const desiredWhaleTarget = ref(hunt.desiredWhaleCount);
 
 const radii = [5, 10, 20] as const;
@@ -437,10 +438,6 @@ const selectedLead = computed(() => {
 });
 const selectedCluster = computed(() => clusters.value.find((cluster) => cluster.key === selectedPinId.value) ?? null);
 const selectedLeadKey = computed(() => selectedLead.value?.propertyId ?? selectedLead.value?.id ?? "");
-const selectedLeadSummary = computed(() => {
-  if (!selectedLead.value) return "Tap a pin to inspect a lead.";
-  return `Opportunity ${selectedLead.value.opportunityScore} · ${selectedLead.value.nextBestAction.label}`;
-});
 const savedLeadIds = computed(() =>
   results.value.filter((lead) => lead.outcome === "SAVED").map((lead) => lead.propertyId ?? lead.id),
 );
@@ -448,8 +445,14 @@ const selectedLeadTitle = computed(() =>
   formatLeadTitle(selectedLead.value?.address, selectedLead.value?.city, selectedLead.value?.state, selectedLead.value?.postalCode),
 );
 const mapSubtitle = computed(() => `${results.value.length} ranked leads · ${clusters.value.length} dense clusters`);
-const mapCenterLatitude = computed(() => currentLatitude.value ?? fallback.latitude);
-const mapCenterLongitude = computed(() => currentLongitude.value ?? fallback.longitude);
+const leadMapOrigin = computed(() => currentLatitude.value != null && currentLongitude.value != null
+  ? { latitude: currentLatitude.value, longitude: currentLongitude.value }
+  : null);
+const leadMapOriginLabel = computed(() => currentLocation.source.value === "LIVE_DEVICE"
+  ? "your live location"
+  : currentLocation.source.value === "RECENT_DEVICE"
+    ? "your recent location"
+    : "the scan center");
 
 const clusters = computed(() => {
   const serverClusters = scanProgress.value?.clusters ?? [];
@@ -570,51 +573,17 @@ async function addClusterToRoute(cluster: ClusterRouteTarget, mode: "all" | "str
   }
 }
 
-const mapPoints = computed<PropertyVisualPoint[]>(() => {
-  const points: PropertyVisualPoint[] = [];
-  if (currentLatitude.value != null && currentLongitude.value != null) {
-    points.push({
-      id: "current-location",
-      latitude: currentLatitude.value,
-      longitude: currentLongitude.value,
-      kind: "current",
-      tone: "blue",
-      label: "You are here",
-    });
-  }
-
-  const clustered = new Set<string>();
-  for (const cluster of clusters.value) {
-    const representative = cluster.leads[0];
-    if (representative.latitude == null || representative.longitude == null) continue;
-    clustered.add(cluster.key);
-    points.push({
-      id: cluster.key,
-      latitude: representative.latitude,
-      longitude: representative.longitude,
-      kind: "cluster",
-      tone: toneFromLead(representative),
-      count: cluster.count,
-      label: cluster.label,
-    });
-  }
-
-  for (const lead of results.value) {
-    if (lead.latitude == null || lead.longitude == null) continue;
-    if (clustered.has(clusterKeyForLead(lead)) && clusterSizeForKey(clusterKeyForLead(lead)) > 1) {
-      continue;
-    }
-    points.push({
-      id: lead.propertyId ?? lead.id,
-      latitude: lead.latitude,
-      longitude: lead.longitude,
-      kind: "lead",
-      tone: toneFromLead(lead),
-      label: formatLeadTitle(lead.address, lead.city, lead.state, lead.postalCode),
-    });
-  }
-  return points;
-});
+const realMapPoints = computed<RealLeadMapPoint[]>(() => results.value
+  .filter((lead) => lead.latitude != null && lead.longitude != null)
+  .map((lead) => ({
+    id: lead.propertyId ?? lead.id,
+    latitude: lead.latitude,
+    longitude: lead.longitude,
+    label: formatLeadTitle(lead.address, lead.city, lead.state, lead.postalCode),
+    tone: lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE"
+      ? "gold"
+      : lead.opportunityScore >= 70 ? "green" : "blue",
+  })));
 
 onMounted(() => {
   loadRecentSearches();
@@ -931,10 +900,6 @@ function clusterKeyForLead(lead: DiscoveryScanLead) {
   return lead.clusterId ?? `${Math.round((lead.latitude ?? 0) * 100)}:${Math.round((lead.longitude ?? 0) * 100)}`;
 }
 
-function clusterSizeForKey(key: string) {
-  return clusters.value.find((cluster) => cluster.key === key)?.count ?? 0;
-}
-
 function clusterLabelForLead(lead: DiscoveryScanLead) {
   const address = lead.address.split(",")[0];
   return address.length > 24 ? `${address.slice(0, 24).trim()}...` : address;
@@ -1023,15 +988,6 @@ function sanitizeText(value?: string | null) {
 
 function isPlusCode(value: string) {
   return /(?:^|\s)[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}(?:\s|$)/i.test(value);
-}
-
-function toneFromLead(lead: DiscoveryScanLead) {
-  if (lead.outcome === "APPOINTMENT_BOOKED") return "purple";
-  if (lead.outcome === "NOT_HOME") return "blue";
-  if (lead.outcome === "BILL_REQUESTED" || lead.outcome === "BILL_RECEIVED") return "green";
-  if (lead.whaleQualification === "WHALE" || lead.whaleQualification === "MEGA_WHALE") return "gold";
-  if ((lead.maxRoofSolarCapacityKw ?? 0) >= 15) return "green";
-  return "gray";
 }
 
 function formatNumber(value?: number | null) {

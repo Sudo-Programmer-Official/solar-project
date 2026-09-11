@@ -34,6 +34,7 @@ declare module 'vue' {
     PropertyDetailDrawer: typeof import('./src/components/PropertyDetailDrawer.vue')['default']
     PropertyMediaViewer: typeof import('./src/components/PropertyMediaViewer.vue')['default']
     PropertyVisual: typeof import('./src/components/PropertyVisual.vue')['default']
+    RealLeadMap: typeof import('./src/components/RealLeadMap.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SatelliteImagePanel: typeof import('./src/components/SatelliteImagePanel.vue')['default']
