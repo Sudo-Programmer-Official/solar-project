@@ -727,6 +727,10 @@ function resolveUrl(path: string): string {
   return useSameOriginApi || !baseUrl ? path : `${baseUrl}${path}`;
 }
 
+export function buildMapTileUrl(zoom: number, x: number, y: number): string {
+  return resolveUrl(`/api/v1/map/tiles/${zoom}/${x}/${y}.png`);
+}
+
 export async function getApiHealth(): Promise<{ status: "ok"; service: string } | null> {
   return requestJson<{ status: "ok"; service: string }>("/health");
 }

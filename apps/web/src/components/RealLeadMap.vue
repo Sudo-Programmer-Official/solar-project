@@ -18,7 +18,7 @@
             :style="tile.style"
             alt=""
             loading="lazy"
-            referrerpolicy="no-referrer"
+            crossorigin="use-credentials"
           />
 
           <div class="absolute inset-0 bg-white/10" />
@@ -85,6 +85,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import { buildMapTileUrl } from "../services/api";
 import { calculateDistanceMiles, isValidCoordinate, type DistanceCoordinate } from "../../../../packages/geospatial/src/index";
 
 export interface RealLeadMapPoint {
@@ -161,7 +162,7 @@ const tiles = computed(() => {
     for (let x = grid.xStart; x <= grid.xEnd; x += 1) {
       result.push({
         key: `${zoom.value}-${x}-${y}`,
-        url: `https://tile.openstreetmap.org/${zoom.value}/${x}/${y}.png`,
+        url: buildMapTileUrl(zoom.value, x, y),
         style: {
           left: `${((x - grid.xStart) / grid.columns) * 100}%`,
           top: `${((y - grid.yStart) / grid.rows) * 100}%`,

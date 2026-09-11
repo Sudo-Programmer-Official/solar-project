@@ -63,6 +63,7 @@ import { randomUUID } from "node:crypto";
 import { FieldOperationsService } from "./field-operations";
 import { handleIntelligenceRoute } from "./intelligence";
 import type { FieldBillStorage } from "./field-bill-storage";
+import { fetchOpenStreetMapTile, MapTileProviderError, validateTileCoordinates } from "./map-tiles";
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
@@ -143,6 +144,33 @@ export function createServer(repository?: SolarRepository, options: CreateServer
 
       if (intelligenceRepository && url.pathname.startsWith("/api/v1/intelligence/")) {
         await handleIntelligenceRoute(req, res, url, intelligenceRepository, sendJson, corsHeaders);
+        return;
+      }
+
+      const mapTileMatch = url.pathname.match(/^\/api\/v1\/map\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/);
+      if (req.method === "GET" && mapTileMatch) {
+        const zoom = Number(mapTileMatch[1]);
+        const x = Number(mapTileMatch[2]);
+        const y = Number(mapTileMatch[3]);
+        if (!validateTileCoordinates(zoom, x, y)) {
+          sendJson(res, 400, { error: "Invalid map tile coordinates" }, corsHeaders);
+          return;
+        }
+        try {
+          const tile = await fetchOpenStreetMapTile(zoom, x, y);
+          res.writeHead(200, {
+            ...corsHeaders,
+            "content-type": tile.contentType,
+            "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+          });
+          res.end(tile.body);
+        } catch (error) {
+          if (error instanceof MapTileProviderError) {
+            sendJson(res, error.status, { error: "Map tile unavailable" }, corsHeaders);
+            return;
+          }
+          throw error;
+        }
         return;
       }
 
@@ -1266,6 +1294,10 @@ function enforceApiPermission(req: http.IncomingMessage, url: URL, user: Authent
   }
   if (path.startsWith("/api/v1/markets")) {
     requireAnyPermission(user, ["territory:view", "labs:view"]);
+    return;
+  }
+  if (path.startsWith("/api/v1/map/tiles/")) {
+    requireAnyPermission(user, ["labs:view", "lead:view-own", "lead:view-assigned", "lead:view-team", "lead:view-all"]);
     return;
   }
   if (path.startsWith("/api/v1/neighborhoods") || path.startsWith("/api/v1/discovery")) {

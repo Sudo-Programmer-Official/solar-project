@@ -264,3 +264,13 @@ test("Vercel uses a same-origin API proxy for mobile session cookies", async () 
   assert.match(imagerySource, /useSameOriginApi/);
   assert.match(vercelSource, /solarscout-api-if1a\.onrender\.com\/api\/:path\*/);
 });
+
+test("lead maps use the authenticated API tile proxy", async () => {
+  const mapSource = await readFile(new URL("../components/RealLeadMap.vue", import.meta.url), "utf8");
+  const apiSource = await readFile(new URL("../services/api.ts", import.meta.url), "utf8");
+
+  assert.match(mapSource, /buildMapTileUrl/);
+  assert.match(mapSource, /crossorigin="use-credentials"/);
+  assert.doesNotMatch(mapSource, /tile\.openstreetmap\.org/);
+  assert.match(apiSource, /\/api\/v1\/map\/tiles\/\$\{zoom\}\/\$\{x\}\/\$\{y\}\.png/);
+});
